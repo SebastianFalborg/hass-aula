@@ -1,6 +1,10 @@
 {
   "domain": "hass_aula",
   "name": "Aula",
+  "categories": [
+    "productivity_information.calendars_todos",
+    "messaging_notifications"
+  ],
   "codeowners": [
     "@nickknissen"
   ],
