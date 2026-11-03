@@ -1,6 +1,6 @@
 {
   "domain": "hass_aula",
-  "name": "Aula",
+  "name": "Aula for Home Assistant",
   "categories": [
     "productivity_information.calendars_todos",
     "messaging_notifications"
@@ -16,7 +16,7 @@
   "iot_class": "cloud_polling",
   "issue_tracker": "https://github.com/nickknissen/hass-aula/issues",
   "requirements": [
-    "aula==1.13.1"
+    "aula==1.14.0"
   ],
   "version": "1.4.0"
 }
