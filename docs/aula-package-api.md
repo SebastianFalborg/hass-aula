@@ -1,8 +1,8 @@
 # Aula Python Package API Reference
 
-> **Package:** `aula==1.13.1`
+> **Package:** `aula==1.14.0`
 > **Source:** `../aula` (relative to this repo)
-> **Last updated:** 2026-10-23
+> **Last updated:** 2026-11-03
 
 ---
 
@@ -215,7 +215,7 @@ These delegate to `self.widgets.*` and will be removed in a future version:
 
 | Attribute | Type | Notes |
 |-----------|------|-------|
-| `api_url` | `str` | Base API URL with version (e.g. `https://api.aula.dk/api/v24`) |
+| `api_url` | `str` | Base API URL with version (e.g. `https://www.aula.dk/api/v25`) |
 | `widgets` | `AulaWidgetsClient` | Widget-specific API client |
 
 ---
@@ -249,6 +249,7 @@ AulaWidgetsClient(api_client: _WidgetRequestClient) -> None
 | `easyiq_headers` | `easyiq_headers(token: str, institution_filter: list[str], guardian_login: str, child_user_ids: list[str], child_user_id: str = "") -> dict[str, str]` | Headers the EasyIQ portal expects from its embedded widgets |
 | `easyiq_identifier_variants` | `easyiq_identifier_variants(child_profile_id: str, child_user_id: str, guardian_login: str, easyiq_child_id: str \| None = None) -> list[tuple[str, str]]` | `(loginId, child header)` pairs to try, best guess first |
 | `get_meebook_weekplan` | `async get_meebook_weekplan(child_filter: list[str], institution_filter: list[str], week: str, session_uuid: str) -> list[MeebookStudentPlan]` | Fetch Meebook weekly plan |
+| `get_docendo_weekplan` | `async get_docendo_weekplan(week: str) -> list[DocendoWeekPlan]` | Fetch Docendo weekly plans (widget `0057`, 1.14.0), one per class for all children. See [Docendo weekplans](#docendo-weekplans) |
 | `get_momo_courses` | `async get_momo_courses(children: list[str], institutions: list[str], session_uuid: str) -> list[MomoUserCourses]` | Fetch MoMo courses (widget v1.3) |
 | `get_momo_reminders` | `async get_momo_reminders(children: list[str], institutions: list[str], session_uuid: str, from_date: str, due_no_later_than: str) -> list[UserReminders]` | Fetch MoMo reminders (widget v1.10) |
 | `get_library_status` | `async get_library_status(widget_id: str, children: list[str], institutions: list[str], session_uuid: str) -> LibraryStatus` | Fetch library status from Cicero (widget v1.6) |
@@ -966,6 +967,32 @@ class MeebookTask(AulaDataClass):
     link_text: str
 ```
 
+### DocendoWeekPlan / DocendoLesson
+
+Added in 1.14.0. Times are UTC; Docendo sometimes omits the offset, and those values are read as UTC.
+
+```python
+@dataclass
+class DocendoWeekPlan(AulaDataClass):
+    name: str                         # The class, e.g. "4A"
+    note: str
+    lessons: list[DocendoLesson] = [] # Sorted by start_time, missing times last
+
+    def matches_class(self, class_name: str | None) -> bool: ...
+        # Ignores case, spaces and punctuation: "4.A" and "4 a" match "4A"
+
+@dataclass
+class DocendoLesson(AulaDataClass):
+    title: str
+    start_time: datetime | None
+    end_time: datetime | None
+    description: str
+    learning_goal: str
+    notes_for_students: str
+
+    has_content: bool                 # Property: False for breaks and empty lessons
+```
+
 ### MomoUserCourses / MomoCourse
 
 ```python
@@ -1303,12 +1330,13 @@ EasyIQWrongChildSession  — The portal session is on a different child than the
 
 ```python
 API_URL = "https://www.aula.dk/api/v"
-API_VERSION = "24"
+API_VERSION = "25"   # 1.14.0; aula.dk answers 410 Gone for v24
 MIN_UDDANNELSE_API = "https://api.minuddannelse.net/aula"
 SYSTEMATIC_API = "https://systematic-momo.dk/api/aula"
 EASYIQ_API = "https://api.easyiqcloud.dk/api/aula"
 MEEBOOK_API = "https://app.meebook.com/aulaapi"
 CICERO_API = "https://surf.cicero-suite.com/portal-api/rest/aula"
+DOCENDO_API = "https://app.docendo.dk/aula/v2"   # 1.14.0; unofficial, what Docendo's own widget calls
 
 # EasyIQ school portal — homework and weekly plans come from here, not from
 # the Aula REST API. The two data types live on separate controllers.
@@ -1349,6 +1377,7 @@ MIN_UDDANNELSE_TASK_WIDGETS = (WIDGET_MIN_UDDANNELSE_TASKS, WIDGET_MIN_UDDANNELS
 MIN_UDDANNELSE_UGEPLAN_WIDGETS = (WIDGET_MIN_UDDANNELSE_UGEPLAN, WIDGET_MIN_UDDANNELSE_SSO)
 WIDGET_MEEBOOK = "0004"
 WIDGET_HUSKELISTEN = "0062"
+WIDGET_DOCENDO = "0057"   # 1.14.0
 ```
 
 ### Auth URLs
@@ -1654,6 +1683,26 @@ EasyIQ's portal methods need more than this — see
 `session_uuid` doubles as the portal's `guardian_login`, which is the guardian's
 UniLogin: `(await client.get_profile_context())["data"]["userId"]`.
 
+### Docendo weekplans
+
+`get_docendo_weekplan(week)` takes only the week. Docendo does not filter by
+child: one call returns a plan per class for all of the guardian's children.
+Pair a plan with a child by the child's class name, which Aula sends as
+`institutionProfile.metadata`:
+
+```python
+from aula.utils.mapping import get_in
+
+plans = await client.widgets.get_docendo_weekplan("2026-W45")
+class_name = get_in(child._raw or {}, "institutionProfile.metadata", default=None)
+child_plans = [plan for plan in plans if plan.matches_class(class_name)]
+```
+
+`DailyOverview.institution_profile.metadata` holds the same value. The class
+name can be missing or spelled differently from Docendo's, so the CLI
+(`aula docendo:ugeplan`) shows every plan to a guardian with only one child
+when none match.
+
 ### Reading nested API values
 
 Aula sends an explicit `null` for objects it leaves empty, so `data.get("x", {}).get("y")`
@@ -1707,7 +1756,7 @@ def output_json(ctx: click.Context, data: Any) -> bool:
 
 ### API Version Handling
 
-- Current default: `API_VERSION = "24"`
+- Current default: `API_VERSION = "25"`
 - `_request_with_version_retry()` automatically bumps the version on 410 Gone
 - `_set_correct_api_version()` discovers the correct version during `init()`
 
@@ -1750,6 +1799,7 @@ from aula.models import (
     Appointment, AutoReply, Comment, ConsentResponse,
     EasyIQHomework, Group, GroupMember,
     LibraryLoan, LibraryStatus, MeebookStudentPlan,
+    DocendoWeekPlan, DocendoLesson,
     MessageFolder, MomoUserCourses, NotificationSetting,
     UserReminders, MUTask, MUWeeklyPerson, Notification, Post,
     ProfileMasterData, SecureDocument, VacationRegistration,
@@ -1784,6 +1834,7 @@ Constants:
 ```python
 from aula.const import (
     WIDGET_EASYIQ_WEEKPLAN, WIDGET_EASYIQ_HOMEWORK, WIDGET_BIBLIOTEKET,
-    WIDGET_MIN_UDDANNELSE_TASKS, WIDGET_MEEBOOK, WIDGET_HUSKELISTEN, ...
+    WIDGET_MIN_UDDANNELSE_TASKS, WIDGET_MEEBOOK, WIDGET_HUSKELISTEN,
+    WIDGET_DOCENDO, ...
 )
 ```
