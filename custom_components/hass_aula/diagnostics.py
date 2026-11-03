@@ -18,23 +18,33 @@ async def async_get_config_entry_diagnostics(
 ) -> dict[str, Any]:
     """Return diagnostics for a config entry."""
     runtime_data = entry.runtime_data
+    children = runtime_data.profile.children
+
+    # Aula ids identify the account, so children are named by position instead.
+    labels = {
+        child.id: f"child_{position}"
+        for position, child in enumerate(children, start=1)
+    }
+
+    def label(child_id: int) -> str:
+        return labels.get(child_id, REDACTED)
 
     children_data = [
         {
-            "id": child.id,
+            "id": label(child.id),
             "name": REDACTED,
-            "institution_name": child.institution_name,
+            "institution_name": REDACTED,
         }
-        for child in runtime_data.profile.children
+        for child in children
     ]
 
     presence_data: dict[str, Any] = {}
     for child_id, child_data in runtime_data.presence_coordinator.data.items():
         overview = child_data.overview if child_data else None
         if overview is None:
-            presence_data[str(child_id)] = None
+            presence_data[label(child_id)] = None
         else:
-            presence_data[str(child_id)] = {
+            presence_data[label(child_id)] = {
                 "status": overview.status.name if overview.status else None,
                 "location": overview.location.name if overview.location else None,
                 "check_in_time": str(overview.check_in_time)
@@ -47,16 +57,16 @@ async def async_get_config_entry_diagnostics(
 
     calendar_data: dict[str, int] = {}
     for child_id, events in runtime_data.calendar_coordinator.data.items():
-        calendar_data[str(child_id)] = len(events)
+        calendar_data[label(child_id)] = len(events)
 
     # Counts only — message subjects, senders and previews must not leak here.
     messages_data = runtime_data.messages_coordinator.data
 
     result: dict[str, Any] = {
         "profile": {
-            "profile_id": runtime_data.profile.profile_id,
+            "profile_id": REDACTED,
             "display_name": REDACTED,
-            "children_count": len(runtime_data.profile.children),
+            "children_count": len(children),
             "children": children_data,
         },
         "presence": presence_data,
@@ -72,26 +82,26 @@ async def async_get_config_entry_diagnostics(
 
     if runtime_data.library_coordinator and runtime_data.library_coordinator.data:
         widgets["library"] = {
-            str(child_id): len(data.loans) + len(data.longterm_loans)
+            label(child_id): len(data.loans) + len(data.longterm_loans)
             for child_id, data in runtime_data.library_coordinator.data.items()
         }
 
     if runtime_data.mu_tasks_coordinator and runtime_data.mu_tasks_coordinator.data:
         widgets["mu_tasks"] = {
-            str(child_id): len(tasks)
+            label(child_id): len(tasks)
             for child_id, tasks in runtime_data.mu_tasks_coordinator.data.items()
         }
 
     if runtime_data.mu_ugeplan_coordinator and runtime_data.mu_ugeplan_coordinator.data:
         ugeplan_data = runtime_data.mu_ugeplan_coordinator.data
         widgets["mu_ugeplan"] = {
-            str(child_id): len(letters)
+            label(child_id): len(letters)
             for child_id, letters in ugeplan_data.current.items()
         }
 
     if runtime_data.easyiq_coordinator and runtime_data.easyiq_coordinator.data:
         widgets["easyiq"] = {
-            str(child_id): {
+            label(child_id): {
                 "weekplan": len(data.weekplan),
                 "homework": len(data.homework),
             }
@@ -101,7 +111,7 @@ async def async_get_config_entry_diagnostics(
     if runtime_data.meebook_coordinator and runtime_data.meebook_coordinator.data:
         meebook_data = runtime_data.meebook_coordinator.data
         widgets["meebook"] = {
-            str(child_id): {
+            label(child_id): {
                 "current_week": len(tasks),
                 "next_week": (
                     len(meebook_data.next_week.get(child_id, []))
@@ -117,7 +127,7 @@ async def async_get_config_entry_diagnostics(
         and runtime_data.huskelisten_coordinator.data
     ):
         widgets["huskelisten"] = {
-            str(child_id): len(data.team_reminders) + len(data.assignment_reminders)
+            label(child_id): len(data.team_reminders) + len(data.assignment_reminders)
             for child_id, data in runtime_data.huskelisten_coordinator.data.items()
         }
 

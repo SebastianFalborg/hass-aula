@@ -16,9 +16,11 @@ from custom_components.hass_aula.diagnostics import async_get_config_entry_diagn
 from .conftest import (
     make_config_entry,
     make_widget_config_entry,
+    mock_child,
     mock_daily_overview,
     mock_meebook_student_plan,
     mock_meebook_task,
+    mock_profile,
 )
 
 
@@ -37,6 +39,40 @@ async def test_diagnostics_redacts_pii(
     assert result["profile"]["display_name"] == "**REDACTED**"
     assert result["profile"]["children"][0]["name"] == "**REDACTED**"
     assert result["profile"]["children_count"] == 1
+
+
+async def test_diagnostics_redacts_account_identifiers(
+    hass: HomeAssistant,
+    mock_aula_client: AsyncMock,
+) -> None:
+    """Test that Aula ids and schools are left out, keyed by child position."""
+    profile = mock_profile(
+        children=[
+            mock_child(child_id=48151, institution_name="Northside School"),
+            mock_child(child_id=62342, institution_name="Southside School"),
+        ]
+    )
+    profile.profile_id = 77001
+    mock_aula_client.get_profile = AsyncMock(return_value=profile)
+
+    entry = make_widget_config_entry(widgets=[WIDGET_MEEBOOK])
+    entry.add_to_hass(hass)
+    await hass.config_entries.async_setup(entry.entry_id)
+    await hass.async_block_till_done()
+
+    result = await async_get_config_entry_diagnostics(hass, entry)
+
+    assert result["profile"]["profile_id"] == "**REDACTED**"
+    assert result["profile"]["children"] == [
+        {"id": "child_1", "name": "**REDACTED**", "institution_name": "**REDACTED**"},
+        {"id": "child_2", "name": "**REDACTED**", "institution_name": "**REDACTED**"},
+    ]
+    assert set(result["presence"]) == {"child_1", "child_2"}
+    assert set(result["calendar_event_counts"]) == {"child_1", "child_2"}
+    assert set(result["widgets"]["meebook"]) == {"child_1", "child_2"}
+    serialized = json.dumps(result, cls=JSONEncoder)
+    for secret in ("48151", "62342", "77001", "Northside", "Southside"):
+        assert secret not in serialized
 
 
 async def test_diagnostics_structure(
@@ -74,8 +110,8 @@ async def test_diagnostics_presence_data(
 
     result = await async_get_config_entry_diagnostics(hass, entry)
 
-    assert "1" in result["presence"]
-    presence = result["presence"]["1"]
+    assert "child_1" in result["presence"]
+    presence = result["presence"]["child_1"]
     assert "status" in presence
     assert "check_in_time" in presence
     # aula delivers this as a PresenceLocation, which cannot be JSON-encoded;
@@ -96,8 +132,8 @@ async def test_diagnostics_calendar_counts(
 
     result = await async_get_config_entry_diagnostics(hass, entry)
 
-    assert "1" in result["calendar_event_counts"]
-    assert isinstance(result["calendar_event_counts"]["1"], int)
+    assert "child_1" in result["calendar_event_counts"]
+    assert isinstance(result["calendar_event_counts"]["child_1"], int)
 
 
 @pytest.mark.parametrize("next_count", [0, 2, None])
@@ -128,7 +164,7 @@ async def test_diagnostics_meebook_week_counts(
 
     result = await async_get_config_entry_diagnostics(hass, entry)
 
-    assert result["widgets"]["meebook"]["1"] == {
+    assert result["widgets"]["meebook"]["child_1"] == {
         "current_week": 1,
         "next_week": next_count,
     }
