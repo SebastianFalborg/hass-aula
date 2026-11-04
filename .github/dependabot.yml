@@ -16,7 +16,9 @@ updates:
     schedule:
       interval: "daily"
     ignore:
-      # Dependabot should not update Home Assistant as that should match the homeassistant key in hacs.json
+      # Home Assistant is the test pin, not the supported minimum (that is the
+      # homeassistant key in hacs.json, set by the Python version aula requires).
+      # Bump it by hand together with the test plugin below.
       - dependency-name: "homeassistant"
       # The test plugin pins Home Assistant exactly; update the pair together.
       - dependency-name: "pytest-homeassistant-custom-component"

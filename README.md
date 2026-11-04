@@ -1,6 +1,6 @@
 # Aula for Home Assistant
 
-[![hacs_badge](https://img.shields.io/badge/HACS-Custom-orange.svg)](https://github.com/hacs/integration)
+[![hacs_badge](https://img.shields.io/badge/HACS-Default-41BDF5.svg)](https://github.com/hacs/integration)
 [![GitHub Release](https://img.shields.io/github/v/release/nickknissen/hass-aula)](https://github.com/nickknissen/hass-aula/releases)
 [![License](https://img.shields.io/github/license/nickknissen/hass-aula)](LICENSE)
 [![GitHub Issues](https://img.shields.io/github/issues/nickknissen/hass-aula)](https://github.com/nickknissen/hass-aula/issues)
@@ -34,7 +34,7 @@ Arriving there as a pull request would have meant replacing almost all of the ex
 
 ## Prerequisites
 
-- Home Assistant **2026.1** or newer
+- Home Assistant **2026.3.0** or newer
 - An [Aula](https://www.aula.dk) account with children registered
 - A Danish **MitID** account, with either the MitID app on your phone or a MitID code display (kodeviser)
 
@@ -44,12 +44,11 @@ Arriving there as a pull request would have meant replacing almost all of the ex
 
 ### Via HACS (Recommended)
 
+[![Open your Home Assistant instance and open this repository in HACS.](https://my.home-assistant.io/badges/hacs_repository.svg)](https://my.home-assistant.io/redirect/hacs_repository/?owner=nickknissen&repository=hass-aula&category=integration)
+
 1. Open **HACS** in Home Assistant
-2. Go to **Integrations**
-3. Click the three-dot menu → **Custom repositories**
-4. Add `https://github.com/nickknissen/hass-aula` with category **Integration**
-5. Search for **Aula** and click **Download**
-6. Restart Home Assistant
+2. Search for **Aula for Home Assistant** (by nickknissen) and click **Download**
+3. Restart Home Assistant
 
 ### Manual
 
