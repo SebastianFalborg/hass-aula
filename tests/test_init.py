@@ -269,11 +269,7 @@ async def test_stale_device_removal(
 
         # Verify second child device was removed
         device_registry = dr.async_get(hass)
-        devices = [
-            d
-            for d in device_registry.devices.values()
-            if (DOMAIN, "2") in d.identifiers
-        ]
+        devices = [d for d in device_registry.devices if (DOMAIN, "2") in d.identifiers]
         assert len(devices) == 0
 
 

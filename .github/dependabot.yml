@@ -21,4 +21,4 @@ updates:
       # Bump it by hand together with the test plugin below.
       - dependency-name: "homeassistant"
       # The test plugin pins Home Assistant exactly; update the pair together.
-      - dependency-name: "pytest-homeassistant-custom-component"
+      - dependency-name: "pytest-homeassistant"
