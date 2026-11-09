@@ -42,13 +42,15 @@ Arriving there as a pull request would have meant replacing almost all of the ex
 
 ## Installation
 
-### Via HACS (Recommended)
+### Via the Marketplace (Recommended)
 
-[![Open your Home Assistant instance and open this repository in HACS.](https://my.home-assistant.io/badges/hacs_repository.svg)](https://my.home-assistant.io/redirect/hacs_repository/?owner=nickknissen&repository=hass-aula&category=integration)
+[![Open your Home Assistant instance and open this repository in the Marketplace.](https://my.home-assistant.io/badges/marketplace_repository.svg)](https://my.home-assistant.io/redirect/marketplace_repository/?owner=nickknissen&repository=hass-aula&category=integration)
 
-1. Open **HACS** in Home Assistant
-2. Search for **Aula for Home Assistant** (by nickknissen) and click **Download**
+1. Go to **Settings → Marketplace**
+2. Search for **Aula for Home Assistant** (by nickknissen) and click **Install**
 3. Restart Home Assistant
+
+On Home Assistant before 2026.11, the Marketplace is the HACS custom integration instead: open **HACS**, search for **Aula for Home Assistant** and click **Download**, then restart. The button above works there too.
 
 ### Manual
 
