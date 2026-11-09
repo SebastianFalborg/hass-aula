@@ -1,8 +1,8 @@
 # Aula Python Package API Reference
 
-> **Package:** `aula==1.14.0`
+> **Package:** `aula==1.16.0`
 > **Source:** `../aula` (relative to this repo)
-> **Last updated:** 2026-11-03
+> **Last updated:** 2026-11-09
 
 ---
 
@@ -53,7 +53,7 @@ Supports `async with` context manager.
 
 | Method | Signature | Description |
 |--------|-----------|-------------|
-| `get_profile` | `async get_profile() -> Profile` | Fetch authenticated user's profile with children |
+| `get_profile` | `async get_profile() -> Profile` | Fetch authenticated user's profile with children, including extended-access ("udvidet adgang") children from `getProfileContext` |
 | `get_profile_context` | `async get_profile_context() -> dict[str, Any]` | Fetch profile context for current guardian session |
 | `get_profile_master_data` | `async get_profile_master_data(institution_profile_id: int) -> ProfileMasterData \| None` | Fetch extended profile master data (email, phone, address) |
 
@@ -150,13 +150,13 @@ make Aula reject the request.
 | `get_groups` | `async get_groups(institution_codes: list[str], child_institution_profile_ids: list[int]) -> list[Group]` | Fetch groups for given institution codes and child profile IDs |
 | `get_group` | `async get_group(group_id: int) -> Group \| None` | Fetch a single group by ID |
 | `get_group_members` | `async get_group_members(group_id: int, portal_roles: list[str] \| None = None) -> list[GroupMember]` | Fetch members of a group |
-| `search_groups` | `async search_groups(text: str, limit: int = 100) -> list[Group]` | Search for groups by name |
+| `search_groups` | `async search_groups(text: str, limit: int = 100) -> list[Group]` | Search for groups by name (`search.findGroups`) |
 
 ### Posts
 
 | Method | Signature | Description |
 |--------|-----------|-------------|
-| `get_posts` | `async get_posts(institution_profile_ids: list[int], page: int = 1, limit: int = 10) -> list[Post]` | Fetch posts from Aula |
+| `get_posts` | `async get_posts(institution_profile_ids: list[int], page: int = 1, limit: int = 10) -> list[Post]` | Fetch posts from Aula; `page` is 1-based and sent as item offset `(page - 1) * limit` |
 | `get_post` | `async get_post(post_id: int) -> Post \| None` | Fetch a single post by ID |
 | `get_comments` | `async get_comments(parent_type: str, parent_id: int, limit: int = 100) -> list[Comment]` | Fetch comments for a given parent (e.g. post) |
 
@@ -165,8 +165,8 @@ make Aula reject the request.
 | Method | Signature | Description |
 |--------|-----------|-------------|
 | `get_consent_responses` | `async get_consent_responses(institution_profile_ids: list[int]) -> list[ConsentResponse]` | Fetch consent responses for given institution profile IDs |
-| `get_secure_documents` | `async get_secure_documents(institution_profile_ids: list[int]) -> list[SecureDocument]` | Fetch secure documents shared with/by user |
-| `get_common_files` | `async get_common_files(institution_profile_ids: list[int]) -> list[SecureDocument]` | Fetch common institution files |
+| `get_secure_documents` | `async get_secure_documents(institution_profile_ids: list[int], page_size: int = 20) -> list[SecureDocument]` | Fetch every secure document shared with the user, paging through all; pass the user's own institution profile IDs (a child's ID gets 403) |
+| `get_common_files` | `async get_common_files(institution_codes: list[str], page_size: int = 20) -> list[CommonFile]` | Fetch every common file the given institutions share, paging through all; a guardian passes their children's institution codes |
 
 ### Search
 
@@ -714,9 +714,24 @@ class SecureDocument(AulaDataClass):
     description: str = ""
     created_at: str | None = None
     updated_at: str | None = None
-    owner_name: str = ""
+    owner_name: str = ""       # from `creator`, falling back to `owner`
     institution_code: str = ""
     is_read: bool = False
+```
+
+### CommonFile
+
+```python
+@dataclass
+class CommonFile(AulaDataClass):
+    id: int
+    title: str = ""
+    created_at: str | None = None
+    institution_code: str = ""
+    institution_name: str = ""
+    file_name: str = ""
+    file_url: str = ""
+    is_data_policy: bool = False
 ```
 
 ### VacationRegistration
@@ -764,7 +779,7 @@ class ProfileReference(AulaDataClass):
 ```python
 @dataclass
 class Group(AulaDataClass):
-    id: int
+    id: int            # always coerced to int
     name: str
     group_type: str = ""
     institution_code: str = ""
@@ -1796,7 +1811,7 @@ Additional models must be imported from `aula.models`:
 
 ```python
 from aula.models import (
-    Appointment, AutoReply, Comment, ConsentResponse,
+    Appointment, AutoReply, Comment, CommonFile, ConsentResponse,
     EasyIQHomework, Group, GroupMember,
     LibraryLoan, LibraryStatus, MeebookStudentPlan,
     DocendoWeekPlan, DocendoLesson,
