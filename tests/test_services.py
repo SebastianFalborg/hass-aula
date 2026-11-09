@@ -35,7 +35,7 @@ from .conftest import make_config_entry, mock_child, mock_message, mock_profile
 
 if TYPE_CHECKING:
     from homeassistant.core import HomeAssistant
-    from pytest_homeassistant_custom_component.common import MockConfigEntry
+    from pytest_homeassistant.common import MockConfigEntry
 
 
 async def _setup_integration(
@@ -55,10 +55,9 @@ async def _setup_integration(
 
 def _device_id(hass: HomeAssistant, child_id: int) -> str:
     """Return the registry device ID for a child."""
-    device = dr.async_get(hass).async_get_device(
+    [device] = dr.async_get(hass).async_get_devices(
         identifiers={(DOMAIN, str(child_id))},
     )
-    assert device is not None
     return device.id
 
 
@@ -367,9 +366,9 @@ async def test_account_device_is_not_a_valid_target(
     mock_aula_client: AsyncMock,
 ) -> None:
     """The profile-level device cannot be targeted."""
-    await _setup_integration(hass, mock_aula_client)
-    device = dr.async_get(hass).async_get_device(
-        identifiers={(DOMAIN, "profile_42")},
+    entry = await _setup_integration(hass, mock_aula_client)
+    device = dr.async_get(hass).async_get_device_by_identifier(
+        (DOMAIN, "profile_42"), entry.entry_id
     )
     assert device is not None
 

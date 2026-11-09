@@ -31,8 +31,7 @@ from aula.models.mu_weekly_letter import (
 from aula.models.notification import Notification
 from aula.models.presence import PresenceState
 from aula.models.presence_location import PresenceLocation
-from homeassistant.core import HomeAssistant
-from pytest_homeassistant_custom_component.common import MockConfigEntry
+from pytest_homeassistant.common import MockConfigEntry
 
 from custom_components.hass_aula.const import (
     CONF_MITID_USERNAME,
@@ -55,14 +54,6 @@ MOCK_TOKEN_DATA = {
     },
     "cookies": {},
 }
-
-
-@pytest.fixture(autouse=True)
-def enable_custom_integrations(hass: HomeAssistant) -> None:
-    """Enable custom integrations for all tests."""
-    from homeassistant import loader
-
-    hass.data.pop(loader.DATA_CUSTOM_COMPONENTS, None)
 
 
 def make_config_entry(**kwargs: Any) -> MockConfigEntry:

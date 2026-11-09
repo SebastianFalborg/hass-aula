@@ -63,7 +63,7 @@ Uses `asyncio.Lock` to prevent concurrent refreshes. `async_refresh_and_rebuild_
 
 ## Test Patterns
 
-- **Framework:** `pytest` + `pytest-homeassistant-custom-component`, `asyncio_mode = auto`
+- **Framework:** `pytest` + `pytest-homeassistant` (published from home-assistant/core `packages/`), `asyncio_mode = auto`. Custom integrations are enabled by default, so there is no `enable_custom_integrations` fixture
 - **Fixtures:** `conftest.py` provides factory functions (`mock_child`, `mock_profile`, `mock_daily_overview`, etc.) returning `MagicMock` objects spec'd against real aula model classes
 - **Client mock:** `mock_aula_client` fixture patches `custom_components.hass_aula.create_client` globally
 - **Entry helpers:** `make_config_entry()` / `make_widget_config_entry(widgets)` for creating `MockConfigEntry` with default Aula data
