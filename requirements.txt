@@ -5,3 +5,5 @@ ruff==0.17.3
 aula==1.14.0
 # Must match the Home Assistant version pinned above. It also pins pytest.
 pytest-homeassistant==2026.11.1
+# CI runs with --cov; the old test plugin pulled this in, the new one does not.
+pytest-cov==7.1.0
