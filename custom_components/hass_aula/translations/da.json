@@ -20,6 +20,13 @@
         "title": "Indtast koden i MitID-appen",
         "description": "MitID-appen bad om en kode i stedet for en QR-scanning. Indtast denne kode i appen, godkend login, og klik derefter **Send**.\n\n## {otp_code}"
       },
+      "mitid_identity": {
+        "title": "Vælg MitID-identitet",
+        "description": "Dit MitID har mere end én identitet. Vælg den du vil logge ind på Aula med. For en forælder er det typisk den private identitet.",
+        "data": {
+          "identity": "Identitet"
+        }
+      },
       "mitid_token": {
         "title": "MitID kodeviser",
         "description": "Indtast MitID-adgangskoden for **{mitid_username}** og en ny kode fra din kodeviser. Koden gælder kun kort tid, så aflæs den lige inden du sender.",
@@ -64,7 +71,8 @@
     },
     "progress": {
       "authenticating": "Åbn MitID-appen og godkend login.",
-      "authenticating_token": "Logger ind med koden fra din MitID kodeviser."
+      "authenticating_token": "Logger ind med koden fra din MitID kodeviser.",
+      "logging_in": "Logger ind på Aula med den valgte identitet."
     },
     "error": {
       "auth_failed": "MitID-godkendelse mislykkedes. Prøv venligst igen.",

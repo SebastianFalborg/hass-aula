@@ -20,6 +20,13 @@
         "title": "Enter the code in the MitID app",
         "description": "The MitID app asked for a code instead of a QR scan. Type this code in the app, approve the login, then click **Submit**.\n\n## {otp_code}"
       },
+      "mitid_identity": {
+        "title": "Choose MitID identity",
+        "description": "Your MitID has more than one identity. Choose the one to log in to Aula with. For a parent this is usually the private identity.",
+        "data": {
+          "identity": "Identity"
+        }
+      },
       "mitid_token": {
         "title": "MitID code display",
         "description": "Enter the MitID password for **{mitid_username}** and a fresh code from your code display. The code is only valid for a short time, so read it right before you submit.",
@@ -64,7 +71,8 @@
     },
     "progress": {
       "authenticating": "Open the MitID app and approve the login request.",
-      "authenticating_token": "Signing in with the code from your MitID code display."
+      "authenticating_token": "Signing in with the code from your MitID code display.",
+      "logging_in": "Logging in to Aula with the chosen identity."
     },
     "error": {
       "auth_failed": "MitID authentication failed. Please try again.",

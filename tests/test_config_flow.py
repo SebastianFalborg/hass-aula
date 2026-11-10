@@ -18,6 +18,7 @@ from custom_components.hass_aula.const import (
     AUTH_METHOD_APP,
     AUTH_METHOD_TOKEN,
     CONF_AUTH_METHOD,
+    CONF_IDENTITY,
     CONF_MITID_PASSWORD,
     CONF_MITID_USERNAME,
     CONF_TOKEN_CODE,
@@ -669,3 +670,246 @@ async def test_reauth_reuses_stored_token_method(
     assert result["reason"] == "reauth_successful"
     assert mock_auth.await_args.kwargs["auth_method"] == AUTH_METHOD_TOKEN
     assert entry.data[CONF_AUTH_METHOD] == AUTH_METHOD_TOKEN
+
+
+# What MitID offers a person with both a private and a business identity, in the
+# "name (detail)" form aula hands to on_identity_selected.
+_IDENTITIES = ["Mette Hansen (Privat)", "Mette Hansen (Firma ApS)"]
+
+_QR_SVG = "custom_components.hass_aula.config_flow.generate_animated_qr_svg"
+
+
+def _identity_options(result: Any) -> dict[str, str]:
+    """Return the mitid_identity options as {value: label}."""
+    for key, validator in result["data_schema"].schema.items():
+        if key == CONF_IDENTITY:
+            return {o["value"]: o["label"] for o in validator.config["options"]}
+    msg = "no identity selector in the mitid_identity form"
+    raise AssertionError(msg)
+
+
+async def _wait_for_step(hass: HomeAssistant, flow_id: str, step_id: str) -> None:
+    """
+    Let the flow react to its progress task while the login is still running.
+
+    async_block_till_done would wait for the login itself, which is paused on
+    the identity choice, so step the loop instead.
+    """
+    for _ in range(20):
+        if hass.config_entries.flow.async_get(flow_id)["step_id"] == step_id:
+            return
+        await asyncio.sleep(0)
+    msg = f"flow never reached {step_id}"
+    raise AssertionError(msg)
+
+
+async def test_app_flow_asks_which_mitid_identity_to_use(
+    hass: HomeAssistant,
+    mock_setup_entry: AsyncMock,
+) -> None:
+    """Test a MitID with several identities logs in with the one the user picks."""
+    result = await hass.config_entries.flow.async_init(
+        DOMAIN, context={"source": SOURCE_USER}
+    )
+
+    approved = asyncio.Event()
+    asked = asyncio.Event()
+    chosen: list[int] = []
+
+    async def fake_authenticate(**kwargs: Any) -> dict[str, Any]:
+        kwargs["on_qr_codes"](None, None)
+        await approved.wait()
+        asked.set()
+        chosen.append(await kwargs["on_identity_selected"](_IDENTITIES))
+        return MOCK_TOKEN_DATA
+
+    with (
+        patch(
+            "custom_components.hass_aula.config_flow.authenticate",
+            side_effect=fake_authenticate,
+        ),
+        patch(_QR_SVG, return_value="<svg/>"),
+        patch(_FETCH_WIDGETS, return_value=[]),
+    ):
+        result = await hass.config_entries.flow.async_configure(
+            result["flow_id"],
+            user_input={CONF_MITID_USERNAME: MOCK_USERNAME},
+        )
+        flow_id = result["flow_id"]
+        assert result["type"] is FlowResultType.FORM
+        assert result["step_id"] == "mitid_qr"
+
+        # Approving in the app takes MitID to its identity picker.
+        approved.set()
+        await asked.wait()
+
+        # Submit on the QR step, as the user does after approving.
+        result = await hass.config_entries.flow.async_configure(flow_id, user_input={})
+        assert result["type"] is FlowResultType.FORM
+        assert result["step_id"] == "mitid_identity"
+        assert _identity_options(result) == {
+            "0": "Mette Hansen (Privat)",
+            "1": "Mette Hansen (Firma ApS)",
+        }
+
+        # The login resumes with the choice and shows progress until it is done.
+        result = await hass.config_entries.flow.async_configure(
+            flow_id, user_input={CONF_IDENTITY: "1"}
+        )
+        assert result["type"] is FlowResultType.SHOW_PROGRESS
+        await hass.async_block_till_done()
+        result = await hass.config_entries.flow.async_configure(flow_id)
+        assert result["type"] is FlowResultType.FORM
+        assert result["step_id"] == "select_widgets"
+
+        result = await hass.config_entries.flow.async_configure(
+            flow_id, user_input={CONF_WIDGETS: []}
+        )
+
+    assert result["type"] is FlowResultType.CREATE_ENTRY
+    assert chosen == [1]
+
+
+async def test_token_flow_asks_which_mitid_identity_to_use(
+    hass: HomeAssistant,
+    mock_setup_entry: AsyncMock,
+) -> None:
+    """Test the code display spinner gives way to the identity picker."""
+    result = await hass.config_entries.flow.async_init(
+        DOMAIN, context={"source": SOURCE_USER}
+    )
+    result = await hass.config_entries.flow.async_configure(
+        result["flow_id"],
+        user_input={
+            CONF_MITID_USERNAME: MOCK_USERNAME,
+            CONF_AUTH_METHOD: AUTH_METHOD_TOKEN,
+        },
+    )
+    flow_id = result["flow_id"]
+
+    mitid_answered = asyncio.Event()
+    asked = asyncio.Event()
+    chosen: list[int] = []
+
+    async def fake_authenticate(**kwargs: Any) -> dict[str, Any]:
+        await mitid_answered.wait()
+        asked.set()
+        chosen.append(await kwargs["on_identity_selected"](_IDENTITIES))
+        return MOCK_TOKEN_DATA
+
+    with (
+        patch(
+            "custom_components.hass_aula.config_flow.authenticate",
+            side_effect=fake_authenticate,
+        ),
+        patch(_FETCH_WIDGETS, return_value=[]),
+    ):
+        result = await hass.config_entries.flow.async_configure(
+            flow_id,
+            user_input={CONF_MITID_PASSWORD: "hunter2", CONF_TOKEN_CODE: "123456"},
+        )
+        assert result["type"] is FlowResultType.SHOW_PROGRESS
+
+        mitid_answered.set()
+        await asked.wait()
+        await _wait_for_step(hass, flow_id, "mitid_identity")
+
+        result = await hass.config_entries.flow.async_configure(flow_id)
+        assert result["type"] is FlowResultType.FORM
+        assert result["step_id"] == "mitid_identity"
+
+        result = await hass.config_entries.flow.async_configure(
+            flow_id, user_input={CONF_IDENTITY: "1"}
+        )
+        assert result["type"] is FlowResultType.SHOW_PROGRESS
+        await hass.async_block_till_done()
+        result = await hass.config_entries.flow.async_configure(flow_id)
+
+    assert result["type"] is FlowResultType.FORM
+    assert result["step_id"] == "select_widgets"
+    assert chosen == [1]
+
+
+async def test_token_flow_finishes_after_the_spinner(
+    hass: HomeAssistant,
+    mock_setup_entry: AsyncMock,
+) -> None:
+    """Test a code display login still running when the spinner shows completes."""
+    result = await hass.config_entries.flow.async_init(
+        DOMAIN, context={"source": SOURCE_USER}
+    )
+    result = await hass.config_entries.flow.async_configure(
+        result["flow_id"],
+        user_input={
+            CONF_MITID_USERNAME: MOCK_USERNAME,
+            CONF_AUTH_METHOD: AUTH_METHOD_TOKEN,
+        },
+    )
+    flow_id = result["flow_id"]
+
+    mitid_answered = asyncio.Event()
+
+    async def fake_authenticate(**_kwargs: Any) -> dict[str, Any]:
+        await mitid_answered.wait()
+        return MOCK_TOKEN_DATA
+
+    with (
+        patch(
+            "custom_components.hass_aula.config_flow.authenticate",
+            side_effect=fake_authenticate,
+        ),
+        patch(_FETCH_WIDGETS, return_value=[]),
+    ):
+        result = await hass.config_entries.flow.async_configure(
+            flow_id,
+            user_input={CONF_MITID_PASSWORD: "hunter2", CONF_TOKEN_CODE: "123456"},
+        )
+        assert result["type"] is FlowResultType.SHOW_PROGRESS
+
+        # SHOW_PROGRESS may only become SHOW_PROGRESS or SHOW_PROGRESS_DONE, so
+        # going straight to the widget form raised a ValueError here.
+        mitid_answered.set()
+        await hass.async_block_till_done()
+        result = await hass.config_entries.flow.async_configure(flow_id)
+
+    assert result["type"] is FlowResultType.FORM
+    assert result["step_id"] == "select_widgets"
+
+
+async def test_closing_the_flow_at_the_identity_step_stops_the_login(
+    hass: HomeAssistant,
+    mock_setup_entry: AsyncMock,
+) -> None:
+    """Test a login waiting on the identity choice is cancelled with the flow."""
+    result = await hass.config_entries.flow.async_init(
+        DOMAIN, context={"source": SOURCE_USER}
+    )
+
+    cancelled = asyncio.Event()
+
+    async def fake_authenticate(**kwargs: Any) -> dict[str, Any]:
+        kwargs["on_qr_codes"](None, None)
+        try:
+            await kwargs["on_identity_selected"](_IDENTITIES)
+        except asyncio.CancelledError:
+            cancelled.set()
+            raise
+        return MOCK_TOKEN_DATA
+
+    with (
+        patch(
+            "custom_components.hass_aula.config_flow.authenticate",
+            side_effect=fake_authenticate,
+        ),
+        patch(_QR_SVG, return_value="<svg/>"),
+    ):
+        result = await hass.config_entries.flow.async_configure(
+            result["flow_id"],
+            user_input={CONF_MITID_USERNAME: MOCK_USERNAME},
+        )
+        assert result["step_id"] == "mitid_identity"
+
+        hass.config_entries.flow.async_abort(result["flow_id"])
+        await hass.async_block_till_done()
+
+    assert cancelled.is_set()

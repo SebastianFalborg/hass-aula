@@ -26,6 +26,7 @@ DOMAIN = "hass_aula"
 EVENT_NOTIFICATION = "hass_aula_notification"
 
 CONF_AUTH_METHOD = "auth_method"
+CONF_IDENTITY = "identity"
 CONF_MITID_PASSWORD = "mitid_password"  # noqa: S105
 CONF_MITID_USERNAME = "mitid_username"
 CONF_TOKEN_CODE = "token_code"  # noqa: S105
