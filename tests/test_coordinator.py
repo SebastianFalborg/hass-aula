@@ -151,6 +151,125 @@ async def test_presence_coordinator_auth_error_refresh_succeeds(
 
     with pytest.raises(UpdateFailed, match="Session refreshed"):
         await coordinator._async_update_data()
+    tm.async_refresh_and_rebuild_client.assert_awaited_once_with(client)
+
+
+def _rejecting_presence_coordinator(
+    hass: HomeAssistant, err: HttpRequestError
+) -> tuple[AulaPresenceCoordinator, AsyncMock, AsyncMock]:
+    """Create a presence coordinator whose daily overview read raises ``err``."""
+    client = AsyncMock()
+    client.get_daily_overview = AsyncMock(side_effect=err)
+    client.get_presence_templates = AsyncMock(return_value=[])
+    tm = _create_token_manager()
+    tm.async_rebuild_after_rejection = AsyncMock(return_value=True)
+    coordinator = AulaPresenceCoordinator(hass, client, mock_profile(), tm)
+    coordinator.config_entry = _create_config_entry()
+    return coordinator, client, tm
+
+
+@pytest.mark.parametrize(
+    "message",
+    [
+        # aula 1.16.0
+        "Aula rejected presence.getDailyOverview (status code 10)",
+        # aula with AulaRejectedError
+        "Aula rejected presence.getDailyOverview "
+        "(status code 10, sub-code 33, HTTP 403)",
+    ],
+)
+async def test_authorization_denied_rebuilds_the_session(
+    hass: HomeAssistant, message: str
+) -> None:
+    """Aula refusing the session builds a new one instead of polling it forever."""
+    coordinator, client, tm = _rejecting_presence_coordinator(
+        hass, HttpRequestError(message, 200)
+    )
+
+    with pytest.raises(UpdateFailed, match="built a new session, retrying"):
+        await coordinator._async_update_data()
+    tm.async_rebuild_after_rejection.assert_awaited_once_with(client)
+
+
+async def test_authorization_denied_rebuilds_the_client_the_request_used(
+    hass: HomeAssistant,
+) -> None:
+    """A client swapped in mid-request is not the one reported as refused."""
+    coordinator, client, tm = _rejecting_presence_coordinator(
+        hass, HttpRequestError("Aula rejected x (status code 10)", 200)
+    )
+
+    async def swap_then_reject(_child_id: int) -> None:
+        coordinator.client = AsyncMock()
+        msg = "Aula rejected x (status code 10)"
+        raise HttpRequestError(msg, 200)
+
+    client.get_daily_overview.side_effect = swap_then_reject
+
+    with pytest.raises(UpdateFailed):
+        await coordinator._async_update_data()
+    tm.async_rebuild_after_rejection.assert_awaited_once_with(client)
+
+
+async def test_authorization_denied_within_the_cooldown(hass: HomeAssistant) -> None:
+    """Without a rebuild the poll fails with Aula's rejection alone."""
+    coordinator, _client, tm = _rejecting_presence_coordinator(
+        hass, HttpRequestError("Aula rejected x (status code 10)", 200)
+    )
+    tm.async_rebuild_after_rejection.return_value = False
+
+    with pytest.raises(UpdateFailed) as exc:
+        await coordinator._async_update_data()
+    assert str(exc.value) == (
+        "Error communicating with Aula API: Aula rejected x (status code 10)"
+    )
+
+
+async def test_authorization_denied_rebuild_auth_failure_reauthenticates(
+    hass: HomeAssistant,
+) -> None:
+    """A rebuild whose token refresh fails needs a new login."""
+    coordinator, _client, tm = _rejecting_presence_coordinator(
+        hass, HttpRequestError("Aula rejected x (status code 10)", 200)
+    )
+    tm.async_rebuild_after_rejection.side_effect = AulaAuthenticationError(
+        "Token refresh failed", 0
+    )
+
+    with pytest.raises(ConfigEntryAuthFailed):
+        await coordinator._async_update_data()
+
+
+async def test_authorization_denied_rebuild_connection_failure(
+    hass: HomeAssistant,
+) -> None:
+    """A rebuild that cannot reach Aula fails the poll and says so."""
+    coordinator, _client, tm = _rejecting_presence_coordinator(
+        hass, HttpRequestError("Aula rejected x (status code 10)", 200)
+    )
+    tm.async_rebuild_after_rejection.side_effect = AulaConnectionError("timeout")
+
+    with pytest.raises(UpdateFailed, match="building a new session failed: timeout"):
+        await coordinator._async_update_data()
+
+
+@pytest.mark.parametrize(
+    "err",
+    [
+        HttpRequestError("Aula rejected x (status code 1)", 200),
+        HttpRequestError("HTTP 400", 400),
+        AulaServerError("HTTP 503", 503),
+    ],
+)
+async def test_other_errors_do_not_rebuild_the_session(
+    hass: HomeAssistant, err: HttpRequestError
+) -> None:
+    """Only an authorization denial rebuilds the session."""
+    coordinator, _client, tm = _rejecting_presence_coordinator(hass, err)
+
+    with pytest.raises(UpdateFailed):
+        await coordinator._async_update_data()
+    tm.async_rebuild_after_rejection.assert_not_awaited()
 
 
 async def test_presence_coordinator_connection_error(hass: HomeAssistant) -> None:
