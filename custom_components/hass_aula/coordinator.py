@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import functools
+import re
 from contextlib import asynccontextmanager
 from datetime import date, timedelta
 from typing import TYPE_CHECKING, Any, cast
@@ -22,6 +23,7 @@ from homeassistant.helpers.update_coordinator import DataUpdateCoordinator, Upda
 from homeassistant.util import dt as dt_util
 
 from .const import (
+    AULA_AUTHORIZATION_DENIED,
     CALENDAR_POLL_INTERVAL,
     DOMAIN,
     EASYIQ_POLL_INTERVAL,
@@ -66,21 +68,37 @@ if TYPE_CHECKING:
     from .token_manager import AulaTokenManager
 
 
+_REJECTION_CODE = re.compile(r"\(status code (\d+)")
+
+
+def _rejection_code(err: HttpRequestError) -> int | None:
+    """Return the status code Aula put in the body of a request it rejected."""
+    # TODO(aula-package): aula 1.16.0 puts the code only in the message. Read  # noqa: TD003, FIX002, E501
+    # AulaRejectedError.code instead once the pin includes it.
+    match = _REJECTION_CODE.search(str(err))
+    return int(match.group(1)) if match else None
+
+
 @asynccontextmanager
 async def _aula_api_errors(
-    token_manager: AulaTokenManager | None = None,
+    token_manager: AulaTokenManager,
+    client: AulaApiClient,
 ) -> AsyncIterator[None]:
-    """Translate Aula API errors to Home Assistant exceptions."""
+    """
+    Translate Aula API errors to Home Assistant exceptions.
+
+    ``client`` is the client the wrapped requests run on, so the session is
+    only rebuilt while that client is still the current one.
+    """
     try:
         yield
     except AulaAuthenticationError as err:
-        if token_manager is not None:
-            try:
-                await token_manager.async_refresh_and_rebuild_client()
-                msg = "Session refreshed, retrying"
-                raise UpdateFailed(msg) from err
-            except AulaAuthenticationError:
-                pass
+        try:
+            await token_manager.async_refresh_and_rebuild_client(client)
+            msg = "Session refreshed, retrying"
+            raise UpdateFailed(msg) from err
+        except AulaAuthenticationError:
+            pass
         raise ConfigEntryAuthFailed(
             translation_domain=DOMAIN,
             translation_key="auth_failed",
@@ -90,7 +108,26 @@ async def _aula_api_errors(
         # the base class itself when Aula answers 200 with an error code in the
         # body (aula 1.13.0).
         msg = f"Error communicating with Aula API: {err}"
+        if _rejection_code(err) == AULA_AUTHORIZATION_DENIED:
+            msg = await _async_rebuild_after_rejection(token_manager, client, msg)
         raise UpdateFailed(msg) from err
+
+
+async def _async_rebuild_after_rejection(
+    token_manager: AulaTokenManager, client: AulaApiClient, msg: str
+) -> str:
+    """Rebuild a session Aula refused, returning the message to fail the poll with."""
+    try:
+        if await token_manager.async_rebuild_after_rejection(client):
+            return f"{msg}; built a new session, retrying"
+    except AulaAuthenticationError as err:
+        raise ConfigEntryAuthFailed(
+            translation_domain=DOMAIN,
+            translation_key="auth_failed",
+        ) from err
+    except HttpRequestError as err:
+        return f"{msg}; building a new session failed: {err}"
+    return msg
 
 
 class _TransientFailureTolerance:
@@ -198,7 +235,7 @@ class AulaPresenceCoordinator(
         child_ids = [child.id for child in self.profile.children]
         today = dt_util.now().date()
 
-        async with _aula_api_errors(self.token_manager):
+        async with _aula_api_errors(self.token_manager, self.client):
             overview_results, templates = await asyncio.gather(
                 asyncio.gather(
                     *(self.client.get_daily_overview(cid) for cid in child_ids)
@@ -350,7 +387,7 @@ class AulaCalendarCoordinator(
     @_tolerate_transient_failures
     async def _async_update_data(self) -> dict[int, list[CalendarEvent]]:
         """Fetch calendar events for all children."""
-        async with _aula_api_errors(self.token_manager):
+        async with _aula_api_errors(self.token_manager, self.client):
             now = dt_util.now()
             start = now.replace(hour=0, minute=0, second=0, microsecond=0)
             end = start + timedelta(days=30)
@@ -408,7 +445,7 @@ class AulaNotificationsCoordinator(
     @_tolerate_transient_failures
     async def _async_update_data(self) -> list[Notification]:
         """Fetch notifications for the active profile."""
-        async with _aula_api_errors(self.token_manager):
+        async with _aula_api_errors(self.token_manager, self.client):
             notifications = await self.client.get_notifications_for_active_profile(
                 limit=50
             )
@@ -500,7 +537,7 @@ class AulaMessagesCoordinator(
     @_tolerate_transient_failures
     async def _async_update_data(self) -> MessagesData:
         """Fetch the latest threads plus the newest message in each."""
-        async with _aula_api_errors(self.token_manager):
+        async with _aula_api_errors(self.token_manager, self.client):
             threads = await self.client.get_message_threads()
             unread_threads = await self.client.get_message_threads(filter_on="unread")
             latest = threads[:MAX_MESSAGE_ITEMS]
@@ -595,7 +632,7 @@ class AulaLibraryCoordinator(
     @_tolerate_transient_failures
     async def _async_update_data(self) -> dict[int, LibraryChildData]:
         """Fetch library status and distribute to children."""
-        async with _aula_api_errors(self.token_manager):
+        async with _aula_api_errors(self.token_manager, self.client):
             status = await self.client.widgets.get_library_status(
                 widget_id=WIDGET_BIBLIOTEKET,
                 children=self.widget_context.child_filter,
@@ -660,7 +697,7 @@ class AulaMUTasksCoordinator(
     async def _async_update_data(self) -> dict[int, list[MUTask]]:
         """Fetch MU tasks and distribute to children."""
         week = dt_util.now().strftime("%G-W%V")
-        async with _aula_api_errors(self.token_manager):
+        async with _aula_api_errors(self.token_manager, self.client):
             tasks = await self.client.widgets.get_mu_tasks(
                 widget_id=self.widget_id,
                 child_filter=self.widget_context.child_filter,
@@ -755,7 +792,7 @@ class AulaMUUgeplanCoordinator(
         current_week = now.strftime("%G-W%V")
         next_week = (now + timedelta(weeks=1)).strftime("%G-W%V")
 
-        async with _aula_api_errors(self.token_manager):
+        async with _aula_api_errors(self.token_manager, self.client):
             current = await self._fetch_week(current_week)
             next_week_data = await self._fetch_week(next_week)
 
@@ -835,7 +872,7 @@ class AulaEasyIQCoordinator(
                 return child.id, EasyIQChildData()
             return child.id, EasyIQChildData(weekplan=weekplan, homework=homework)
 
-        async with _aula_api_errors(self.token_manager):
+        async with _aula_api_errors(self.token_manager, self.client):
             try:
                 results = await asyncio.gather(
                     *(_fetch_child(child) for child in self.profile.children)
@@ -908,7 +945,7 @@ class AulaMeebookCoordinator(
         current_week = now.strftime("%G-W%V")
         next_week = (now + timedelta(weeks=1)).strftime("%G-W%V")
 
-        async with _aula_api_errors(self.token_manager):
+        async with _aula_api_errors(self.token_manager, self.client):
             current = await self._fetch_week(current_week)
             try:
                 next_week_data = await self._fetch_week(next_week)
@@ -954,7 +991,7 @@ class AulaHuskelistenCoordinator(
         from_date = now.strftime("%Y-%m-%d")
         due_no_later_than = (now + timedelta(days=30)).strftime("%Y-%m-%d")
 
-        async with _aula_api_errors(self.token_manager):
+        async with _aula_api_errors(self.token_manager, self.client):
             user_reminders_list = await self.client.widgets.get_momo_reminders(
                 children=self.widget_context.child_filter,
                 institutions=self.widget_context.institution_filter,

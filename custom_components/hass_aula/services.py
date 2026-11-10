@@ -282,12 +282,15 @@ async def _async_call_aula[T](
 ) -> T:
     """Run an Aula API operation, refreshing the session once on auth failure."""
     runtime = entry.runtime_data
+    client = runtime.client
     try:
         try:
-            return await operation(runtime.client)
+            return await operation(client)
         except AulaAuthenticationError:
             LOGGER.debug("Aula rejected the action, refreshing session and retrying")
-            client = await runtime.token_manager.async_refresh_and_rebuild_client()
+            client = await runtime.token_manager.async_refresh_and_rebuild_client(
+                client
+            )
             return await operation(client)
     except AulaAuthenticationError as err:
         raise HomeAssistantError(

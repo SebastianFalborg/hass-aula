@@ -10,6 +10,7 @@ from homeassistant.core import HomeAssistant
 from homeassistant.helpers import device_registry as dr
 
 from custom_components.hass_aula.const import (
+    CONF_TOKEN_DATA,
     CONF_WIDGETS,
     CONFIG_ENTRY_MINOR_VERSION,
     DOMAIN,
@@ -57,6 +58,36 @@ async def test_setup_entry(
     assert entry.state is ConfigEntryState.LOADED
     assert entry.runtime_data is not None
     assert entry.runtime_data.client is mock_aula_client
+
+
+async def test_setup_entry_package_refreshes_are_saved_to_the_entry(
+    hass: HomeAssistant,
+) -> None:
+    """
+    The package refreshes its own copy of the tokens and saves it to the entry.
+
+    It used to rewrite the entry's dict in place, which only reached disk when
+    something else happened to save the entry.
+    """
+    with patch(
+        "custom_components.hass_aula.create_client",
+        return_value=_make_refreshed_client(),
+    ) as mock_create:
+        entry = make_config_entry()
+        entry.add_to_hass(hass)
+        await hass.config_entries.async_setup(entry.entry_id)
+        await hass.async_block_till_done()
+
+    token_data = mock_create.await_args.args[0]
+    assert token_data == entry.data[CONF_TOKEN_DATA]
+    assert token_data is not entry.data[CONF_TOKEN_DATA]
+
+    # What the package does on its own refresh: rewrite its copy, then save it.
+    token_data["tokens"] = {**token_data["tokens"], "refresh_token": "rotated"}
+    assert entry.data[CONF_TOKEN_DATA] != token_data
+    await mock_create.await_args.kwargs["token_storage"].save(token_data)
+
+    assert entry.data[CONF_TOKEN_DATA] == token_data
 
 
 async def test_setup_entry_auth_error(

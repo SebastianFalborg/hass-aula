@@ -33,7 +33,7 @@ Steps: `user` → `mitid_auth` (background auth task) → `mitid_qr` (animated Q
 
 ### Coordinators (`coordinator.py`)
 
-All extend `DataUpdateCoordinator`. Error handling centralized in `_aula_api_errors` context manager (maps Aula exceptions → HA exceptions, auto-refreshes tokens on auth errors). Every `_async_update_data` is wrapped in `@_tolerate_transient_failures`, which keeps the previous data for up to `TRANSIENT_FAILURE_TOLERANCE` consecutive `UpdateFailed`s; a new coordinator needs the decorator and the `_TransientFailureTolerance` mixin, which `_AulaWidgetCoordinator` already includes. Widget coordinators extend `_AulaWidgetCoordinator` which adds name-based child matching.
+All extend `DataUpdateCoordinator`. Error handling centralized in `_aula_api_errors(self.token_manager, self.client)` (maps Aula exceptions → HA exceptions; an auth error refreshes the token, Aula's code 10 rebuilds the session at most once per `REJECTION_REBUILD_COOLDOWN`). It takes the client the wrapped requests run on, so a rebuild skips a client another coordinator already replaced. Every `_async_update_data` is wrapped in `@_tolerate_transient_failures`, which keeps the previous data for up to `TRANSIENT_FAILURE_TOLERANCE` consecutive `UpdateFailed`s; a new coordinator needs the decorator and the `_TransientFailureTolerance` mixin, which `_AulaWidgetCoordinator` already includes. Widget coordinators extend `_AulaWidgetCoordinator` which adds name-based child matching.
 
 | Coordinator | Poll interval |
 |---|---|
@@ -55,7 +55,9 @@ All extend `DataUpdateCoordinator`. Error handling centralized in `_aula_api_err
 
 ### Token manager (`token_manager.py`)
 
-Uses `asyncio.Lock` to prevent concurrent refreshes. `async_refresh_and_rebuild_client()` updates all coordinator client references and closes the old client.
+Uses `asyncio.Lock` to prevent concurrent refreshes. `async_refresh_and_rebuild_client(failed_client)` and `async_rebuild_after_rejection(failed_client)` swap a new client into every coordinator and close the old one; a caller whose `failed_client` is no longer current gets the current client without a second refresh.
+
+Every `create_client` call gets `copy.deepcopy(token_data)` and `token_manager.token_storage`: the aula package rewrites the dict it is given when it refreshes the token by itself, then saves it through that storage.
 
 ### Data (`data.py`)
 

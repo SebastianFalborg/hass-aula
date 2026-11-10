@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import copy
 from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
@@ -249,7 +250,11 @@ async def async_setup_entry(
 
     http_client = await hass.async_add_executor_job(_create_http_client, cookies)
     try:
-        client = await create_client(token_data, http_client=http_client)
+        client = await create_client(
+            copy.deepcopy(token_data),
+            http_client=http_client,
+            token_storage=token_manager.token_storage,
+        )
     except AulaAuthenticationError:
         await http_client.close()
         try:

@@ -101,6 +101,12 @@ HUSKELISTEN_POLL_INTERVAL = 1800  # 30 minutes
 
 TRANSIENT_FAILURE_TOLERANCE = 2  # failed polls in a row that keep the last data
 
+# Aula's status code for a request it refuses as unauthorized. A session Aula
+# accepted until then is rebuilt, at most once per cooldown (seconds), so a
+# refusal that a new session does not fix is not rebuilt on every poll.
+AULA_AUTHORIZATION_DENIED = 10
+REJECTION_REBUILD_COOLDOWN = 1800  # 30 minutes
+
 # Latest-messages sensor shaping
 MAX_MESSAGE_ITEMS = 5
 MAX_PREVIEW_CHARS = 200
