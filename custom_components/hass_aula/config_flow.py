@@ -26,6 +26,7 @@ from .const import (
     AUTH_METHOD_TOKEN,
     AUTH_METHODS,
     CONF_AUTH_METHOD,
+    CONF_IDENTITY,
     CONF_MITID_PASSWORD,
     CONF_MITID_USERNAME,
     CONF_TOKEN_CODE,
@@ -96,6 +97,11 @@ class AulaFlowHandler(ConfigFlow, domain=DOMAIN):
         self._token_code: str = ""
         self._token_error: str | None = None
         self._otp_code: str | None = None
+        # MitID identity picker. The request resolves when MitID asks which
+        # identity to use; the login then waits on the choice.
+        self._identity_request: asyncio.Future[None] | None = None
+        self._identity_choice: asyncio.Future[int] | None = None
+        self._identities: list[str] = []
 
     async def async_step_user(
         self,
@@ -217,6 +223,7 @@ class AulaFlowHandler(ConfigFlow, domain=DOMAIN):
             if uses_qr:
                 self._register_qr_view()
                 LOGGER.debug("QR view registered at /api/hass_aula/qr/%s", self.flow_id)
+            self._identity_request = self.hass.loop.create_future()
             self._auth_task = self.hass.async_create_task(
                 self._async_authenticate(),
                 "hass_aula_mitid_auth",
@@ -229,17 +236,24 @@ class AulaFlowHandler(ConfigFlow, domain=DOMAIN):
                 self._qr_ready_event is not None and self._qr_ready_event.is_set(),
             )
 
+        # This step may be showing progress, and SHOW_PROGRESS can only become
+        # SHOW_PROGRESS or SHOW_PROGRESS_DONE, so hand over via progress_done.
+        if self._pending_identity_choice():
+            return self.async_show_progress_done(next_step_id="mitid_identity")
+
         if self._auth_task.done():
-            return await self._async_auth_task_finished(
-                self._auth_task, uses_qr=uses_qr
-            )
+            return self.async_show_progress_done(next_step_id="mitid_auth_done")
 
         if not uses_qr:
-            # Kodeviser: nothing to display, just wait for the handshake.
+            # Kodeviser: nothing to display, just wait for the handshake. Wait on
+            # the identity question too, or a login paused on it spins forever.
             return self.async_show_progress(
                 step_id="mitid_auth",
                 progress_action="authenticating_token",
-                progress_task=self._auth_task,
+                progress_task=self.hass.async_create_task(
+                    self._wait_for_auth_or_identity_request(),
+                    "hass_aula_mitid_wait",
+                ),
             )
 
         # MitID asked for a typed code instead of a QR scan. Nothing will ever be
@@ -311,16 +325,13 @@ class AulaFlowHandler(ConfigFlow, domain=DOMAIN):
                 return await self.async_step_mitid_otp()
             return await self.async_step_mitid_qr()
 
-        self._unregister_qr_view()
+        if self._auth_task is None:
+            self._unregister_qr_view()
+            return await self._async_auth_complete()
 
-        if self._auth_task and self._auth_task.exception():
-            LOGGER.error("MitID authentication failed: %s", self._auth_task.exception())
-            return self.async_abort(reason="auth_failed")
-
-        if self._auth_task:
-            self._token_data = self._auth_task.result()
-
-        return await self._async_auth_complete()
+        return await self._async_auth_task_finished(
+            self._auth_task, uses_qr=self._auth_method != AUTH_METHOD_TOKEN
+        )
 
     async def async_step_mitid_qr(
         self,
@@ -329,6 +340,8 @@ class AulaFlowHandler(ConfigFlow, domain=DOMAIN):
         """Show QR code step; FORM renders markdown images, PROGRESS does not."""
         if user_input is not None:
             # User clicked Submit after approving on their phone.
+            if self._pending_identity_choice():
+                return await self.async_step_mitid_identity()
             if self._auth_task and self._auth_task.done():
                 self._unregister_qr_view()
                 if self._auth_task.exception():
@@ -358,6 +371,8 @@ class AulaFlowHandler(ConfigFlow, domain=DOMAIN):
         user_input: dict[str, Any] | None = None,
     ) -> ConfigFlowResult:
         """Show the code MitID wants typed into the app instead of a QR scan."""
+        if user_input is not None and self._pending_identity_choice():
+            return await self.async_step_mitid_identity()
         if user_input is not None and self._auth_task and self._auth_task.done():
             self._unregister_qr_view()
             if self._auth_task.exception():
@@ -372,6 +387,54 @@ class AulaFlowHandler(ConfigFlow, domain=DOMAIN):
             step_id="mitid_otp",
             data_schema=vol.Schema({}),
             description_placeholders={"otp_code": self._otp_code or ""},
+        )
+
+    async def async_step_mitid_identity(
+        self,
+        user_input: dict[str, Any] | None = None,
+    ) -> ConfigFlowResult:
+        """Ask which identity to log in with when MitID offers more than one."""
+        task = self._auth_task
+        choice = self._pending_identity_choice()
+        if task is None or choice is None:
+            # Back from the progress shown after the choice.
+            if task and not task.done():
+                return self._async_show_identity_progress(task)
+            return self.async_show_progress_done(next_step_id="mitid_auth_done")
+
+        # The flow manager replays the input of the step that led here, so
+        # only treat it as a choice when it carries one.
+        if user_input is not None and CONF_IDENTITY in user_input:
+            choice.set_result(int(user_input[CONF_IDENTITY]))
+            return self._async_show_identity_progress(task)
+
+        return self.async_show_form(
+            step_id="mitid_identity",
+            data_schema=vol.Schema(
+                {
+                    vol.Required(CONF_IDENTITY): selector.SelectSelector(
+                        selector.SelectSelectorConfig(
+                            options=[
+                                selector.SelectOptionDict(
+                                    value=str(index), label=identity
+                                )
+                                for index, identity in enumerate(self._identities)
+                            ],
+                            mode=selector.SelectSelectorMode.LIST,
+                        ),
+                    ),
+                },
+            ),
+        )
+
+    def _async_show_identity_progress(
+        self, task: asyncio.Task[dict[str, Any]]
+    ) -> ConfigFlowResult:
+        """Show progress while the login carries on with the chosen identity."""
+        return self.async_show_progress(
+            step_id="mitid_identity",
+            progress_action="logging_in",
+            progress_task=task,
         )
 
     async def async_step_select_widgets(
@@ -622,6 +685,17 @@ class AulaFlowHandler(ConfigFlow, domain=DOMAIN):
             if self._qr_ready_event:
                 self._qr_ready_event.set()
 
+        async def on_identity_selected(identities: list[str]) -> int:
+            # MitID offers more than one identity, e.g. private and business.
+            # Wait for the user to pick one rather than guessing.
+            LOGGER.debug("MitID offers %d identities, asking which", len(identities))
+            self._identities = identities
+            choice: asyncio.Future[int] = self.hass.loop.create_future()
+            self._identity_choice = choice
+            if self._identity_request and not self._identity_request.done():
+                self._identity_request.set_result(None)
+            return await choice
+
         async def on_token_digits() -> str:
             return self._token_code
 
@@ -642,6 +716,7 @@ class AulaFlowHandler(ConfigFlow, domain=DOMAIN):
                 on_token_digits=on_token_digits,
                 on_password=on_password,
                 on_otp_code=on_otp_code,
+                on_identity_selected=on_identity_selected,
             )
         finally:
             if self._httpx_client:
@@ -654,6 +729,22 @@ class AulaFlowHandler(ConfigFlow, domain=DOMAIN):
         if self._qr_ready_event:
             await self._qr_ready_event.wait()
 
+    async def _wait_for_auth_or_identity_request(self) -> None:
+        """Wait until the login finishes or MitID asks which identity to use."""
+        if self._auth_task is None or self._identity_request is None:
+            return
+        await asyncio.wait(
+            (self._auth_task, self._identity_request),
+            return_when=asyncio.FIRST_COMPLETED,
+        )
+
+    def _pending_identity_choice(self) -> asyncio.Future[int] | None:
+        """Return the identity choice the login is waiting on, if any."""
+        choice = self._identity_choice
+        if choice is None or choice.done():
+            return None
+        return choice
+
     def _reset_auth_task(self) -> None:
         """Drop a finished auth attempt so the next one starts clean."""
         self._auth_task = None
@@ -663,6 +754,9 @@ class AulaFlowHandler(ConfigFlow, domain=DOMAIN):
         self._httpx_client = None
         self._token_code = ""
         self._otp_code = None
+        self._identity_request = None
+        self._identity_choice = None
+        self._identities = []
 
     def _register_qr_view(self) -> None:
         """Register a temporary HTTP view for serving the QR code SVG."""
@@ -677,3 +771,9 @@ class AulaFlowHandler(ConfigFlow, domain=DOMAIN):
         """Handle flow abort - clean up resources."""
         self._unregister_qr_view()
         return super().async_abort(reason=reason, **kwargs)
+
+    def async_remove(self) -> None:
+        """Stop a login still running when the flow is closed."""
+        # A login paused on the identity choice would otherwise wait forever.
+        if self._auth_task and not self._auth_task.done():
+            self._auth_task.cancel()
