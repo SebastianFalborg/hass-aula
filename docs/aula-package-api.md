@@ -1,8 +1,8 @@
 # Aula Python Package API Reference
 
-> **Package:** `aula==1.16.0`
+> **Package:** `aula==1.17.0`
 > **Source:** `../aula` (relative to this repo)
-> **Last updated:** 2026-11-09
+> **Last updated:** 2026-11-11
 
 ---
 
@@ -132,6 +132,7 @@ make Aula reject the request.
 | Method | Signature | Description |
 |--------|-----------|-------------|
 | `get_calendar_events` | `async get_calendar_events(institution_profile_ids: list[int], start: datetime, end: datetime) -> list[CalendarEvent]` | Fetch events for inclusive whole days (time parts ignored); `ValueError` if start date is after end date (1.13.0). Co-taught lesson rows are merged |
+| `get_calendar_events_by_child` | `async get_calendar_events_by_child(child_ids: list[int], start: datetime, end: datetime) -> dict[int, list[CalendarEvent]]` | One request for every child; an event shared by several children is listed under each. Booked parent meetings show at their booked slot (one extra request per child, only when the range has a meeting; a non-auth failure keeps the calendar row). Timezone-aware bounds, else `ValueError` (1.17.0) |
 | `get_meeting_bookings` | `async get_meeting_bookings(child_id: int, start: datetime, end: datetime) -> list[MeetingBooking]` | A child's booked parent meetings overlapping `[start, end)`, with the booked slot's real times (1.13.0) |
 | `get_calendar_event` | `async get_calendar_event(event_id: int, occurrence_datetime: str \| None = None) -> dict \| None` | Fetch a single calendar event by ID |
 | `get_important_dates` | `async get_important_dates(limit: int = 10, include_today: bool = True) -> list[dict]` | Fetch upcoming important dates |
@@ -267,9 +268,10 @@ child identifiers:
   most once per client and is called automatically by the fetch methods.
 - The portal identifies a child by their **institution profile ID**
   (`child_profile_id`, i.e. `Child.id`) alongside their **UniLogin**
-  (`child_id` / `child_user_id`, i.e. `Child._raw["userId"]`).
+  (`child_id` / `child_user_id`, i.e. `Child.user_id`).
 - `all_child_user_ids` is every child's UniLogin, sent as the `x-childfilter`
-  header. Omitting it makes the portal answer 200 with nothing.
+  header. Omitting it makes the portal answer 200 with nothing. Build it with
+  `easyiq_child_user_ids(profile_context)` from `aula.widgets` (public in 1.17.0).
 - `all_institution_filter` is every institution the **guardian** has, as opposed
   to `institution_filter`, which is the one institution being read. The
   bootstrap runs under `all_institution_filter or institution_filter`, and its
@@ -340,6 +342,8 @@ class Child(AulaDataClass):
     name: str
     institution_name: str
     profile_picture: str
+    user_id: str | None = None           # UniLogin (1.17.0)
+    institution_code: str | None = None  # 1.17.0
 ```
 
 ### ProfileMasterData
@@ -442,13 +446,21 @@ class CalendarEvent(AulaDataClass):
     has_substitute: bool
     substitute_name: str | None
     location: str | None
-    belongs_to: int | None
+    belongs_to: int | None                                      # first of belongs_to_profiles
     teacher_names: list[str] = field(default_factory=list)      # 1.11.0
     substitute_names: list[str] = field(default_factory=list)   # 1.11.0
+    belongs_to_profiles: list[int] = field(default_factory=list)  # 1.17.0
+    event_type: str | None = None   # "lesson", "event", "school_home_meeting", ... (1.17.0)
 ```
 
+When one request covers several children, Aula returns an event they share
+(twins' lesson, a school event for siblings) once and names all of them in
+`belongs_to_profiles`. Filing events by `belongs_to` alone leaves it off the
+other children's calendars; `get_calendar_events_by_child()` does the filing.
+Built without `belongs_to_profiles`, it is filled from `belongs_to`.
+
 Aula returns one `lesson` row per adult on a lesson. `get_calendar_events()`
-folds rows with the same title, timeslot, location and child into one event via
+folds rows with the same title, timeslot, location and children into one event via
 `merge_duplicate_lessons(events)` (exported from `aula.models`), collecting every
 adult into `teacher_names` / `substitute_names`. `teacher_name` /
 `substitute_name` still name the first.
@@ -474,6 +486,9 @@ class MeetingBooking(AulaDataClass):
 `get_meeting_bookings()` needs timezone-aware bounds with `end > start`
 (`ValueError` otherwise), reads in chunks of at most 49 days, and raises
 `HttpRequestError` rather than returning a partial list when a chunk fails.
+
+`booking.as_calendar_event()` (1.17.0) returns the booked slot as a
+`CalendarEvent` belonging to that child, with `event_type` set to the meeting type.
 
 ### PaginationResult
 
@@ -1281,8 +1296,9 @@ CHECK_IN = "check_in_dashboard"
 
 ```
 HttpRequestError                 — Base; any non-2xx response
+├── AulaRejectedError            — Body status.code != 0 (1.17.0)
 ├── AulaAuthenticationError      — 401/403
-│   ├── AulaSessionExpiredError  — Session expired (sub-code 13)
+│   ├── AulaSessionExpiredError  — Session expired (sub-code 23; 13 before 1.17.0)
 │   ├── AulaStepUpRequiredError  — Elevated auth required (sub-code 8)
 │   ├── AulaUserDeactivatedError — User account deactivated (sub-code 7)
 │   └── AulaInvalidTokenError    — Invalid access token (sub-code 9)
@@ -1296,8 +1312,12 @@ All store `status_code: int` as an attribute.
 
 **Error envelopes (1.13.0):** when an Aula API response is 2xx but its body
 carries a non-zero `status.code` (and no sub-code mapped to an auth error), the
-client raises the base `HttpRequestError` itself — not a subclass — instead of
-returning an empty result. Catch `HttpRequestError` to cover it.
+client raises instead of returning an empty result. Since 1.17.0 that is
+`AulaRejectedError`, a subclass of `HttpRequestError`, with `code` (Aula's
+status code; 10 is authorization denied), `sub_code: int | None` and
+`api_method: str | None`. `status_code` stays the HTTP status, often 200. The
+message reads `Aula rejected <method> (status code 10, sub-code 33, HTTP 403)`;
+before 1.17.0 it was the base `HttpRequestError` with only `(status code 10)`.
 
 ### Auth Exceptions (`aula.auth.exceptions`)
 
@@ -1612,7 +1632,12 @@ Supports `async with` context manager.
 2. Follow redirect to MitID
 3. MitID authentication (app QR/OTP or hardware token + password)
 4. Complete MitID flow → SAML response
-5. SAML broker processing
+5. SAML broker processing. Since 1.17.0 the UniLogin `post-broker-login` form's
+   hidden role field `selected-aktoer` is posted as `KONTAKT` (guardian), so
+   users with several roles (a parent with rights at a school) are not refused
+   with status 400; a confirmation page is submitted; and the `SAMLError` says
+   when the identity is linked to a private organisation, or quotes the page's
+   message otherwise
 6. Complete Aula login
 7. Exchange OAuth code for tokens
 
@@ -1693,6 +1718,12 @@ Most widget methods share a common parameter pattern:
 - `week: str` — ISO week string (e.g. `"2024-W10"`)
 - `session_uuid: str` — Unique session identifier
 
+`WidgetContext.from_children(children, profile_context)` from `aula.widgets`
+(1.17.0) builds `child_filter` (each child's `user_id`), `institution_filter`
+(their `institution_code`s, deduplicated) and `session_uuid` (the profile
+context's `data.userId`). Pass a subset of children to scope a call. It raises
+`ValueError` when no child has a UniLogin or the context names no guardian.
+
 EasyIQ's portal methods need more than this — see
 [EasyIQ and the school portal](#easyiq-and-the-school-portal). In particular
 `session_uuid` doubles as the portal's `guardian_login`, which is the guardian's
@@ -1727,6 +1758,7 @@ raises on a present-but-null `x`. Use `get_in` instead:
 from aula.utils.mapping import get_in
 
 get_in(child._raw, "institutionProfile.institutionCode", default="")
+# Since 1.17.0 this particular value is Child.institution_code.
 ```
 
 A missing key, a null value, and an unexpected shape all yield `default`.
@@ -1786,6 +1818,7 @@ from aula import (
     HttpClient, HttpResponse, HttpxHttpClient,
     HttpRequestError, AulaAuthenticationError, AulaConnectionError,
     AulaNotFoundError, AulaRateLimitError, AulaServerError,
+    AulaRejectedError,                    # 1.17.0
     TokenStorage, FileTokenStorage,
     Profile, Child, DailyOverview, Message, MessageThread,
     CalendarEvent, WidgetConfiguration,
@@ -1795,10 +1828,11 @@ from aula import (
 )
 ```
 
-The EasyIQ exceptions live with the widget client:
+The EasyIQ exceptions and the widget helpers live with the widget client:
 
 ```python
 from aula.widgets import EasyIQChildNotInPortal, EasyIQWrongChildSession
+from aula.widgets import WidgetContext, easyiq_child_user_ids   # 1.17.0
 ```
 
 Auth exceptions are not re-exported either:
