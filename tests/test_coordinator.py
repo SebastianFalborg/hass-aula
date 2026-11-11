@@ -51,7 +51,6 @@ from .conftest import (
     mock_library_status,
     mock_meebook_student_plan,
     mock_meebook_task,
-    mock_meeting_booking,
     mock_message,
     mock_message_thread,
     mock_mu_task,
@@ -403,63 +402,16 @@ async def test_presence_coordinator_api_error_envelope(hass: HomeAssistant) -> N
 # --- Calendar Coordinator Tests ---
 
 
-async def test_calendar_coordinator_fetch(hass: HomeAssistant) -> None:
-    """Test calendar coordinator fetches events for all children."""
-    client = AsyncMock()
-    event = mock_calendar_event(belongs_to=1)
-    client.get_calendar_events = AsyncMock(return_value=[event])
-
-    profile = mock_profile()
-    tm = _create_token_manager()
-    coordinator = AulaCalendarCoordinator(hass, client, profile, tm)
-
-    entry = _create_config_entry()
-    coordinator.config_entry = entry
-
-    data = await coordinator._async_update_data()
-
-    assert 1 in data
-    assert len(data[1]) == 1
-    assert data[1][0] is event
-    # No meeting in the range, so no second read for booked slots.
-    client.get_meeting_bookings.assert_not_awaited()
-
-
-def _meeting_row() -> MagicMock:
-    """Return a parent meeting row spanning its week-long booking period."""
-    return mock_calendar_event(
-        event_id=42,
-        title="Skole-hjem-samtale",
-        start=datetime(2024, 1, 15, 8, 0, tzinfo=UTC),
-        end=datetime(2024, 1, 19, 16, 0, tzinfo=UTC),
-        teacher_name=None,
-        belongs_to=1,
-        event_type="school_home_meeting",
-    )
-
-
-async def test_calendar_coordinator_shows_booked_meeting_slots(
+async def test_calendar_coordinator_fetch(
     hass: HomeAssistant, freezer: FrozenDateTimeFactory
 ) -> None:
-    """Test each child's booked slot replaces the meeting's booking period."""
+    """Test the coordinator keeps aula's per-child calendars for 30 whole days."""
     freezer.move_to("2024-01-14T12:00:00+00:00")
-    lesson = mock_calendar_event(event_id=1, belongs_to=1)
+    # Twins share a lesson: aula lists it under both.
+    shared = mock_calendar_event(event_id=1, belongs_to=1, profiles=[1, 2])
+    calendars = {1: [shared], 2: [shared]}
     client = AsyncMock()
-    # Aula files the shared row under the first child it names only.
-    client.get_calendar_events = AsyncMock(return_value=[lesson, _meeting_row()])
-    slots = {
-        1: [mock_meeting_booking(child_id=1)],
-        2: [
-            mock_meeting_booking(
-                child_id=2,
-                start=datetime(2024, 1, 16, 15, 40, tzinfo=UTC),
-                end=datetime(2024, 1, 16, 16, 0, tzinfo=UTC),
-            )
-        ],
-    }
-    client.get_meeting_bookings = AsyncMock(
-        side_effect=lambda child_id, _start, _end: slots[child_id]
-    )
+    client.get_calendar_events_by_child = AsyncMock(return_value=calendars)
 
     profile = mock_profile([mock_child(1), mock_child(2, name="Second Child")])
     coordinator = AulaCalendarCoordinator(
@@ -469,89 +421,17 @@ async def test_calendar_coordinator_shows_booked_meeting_slots(
 
     data = await coordinator._async_update_data()
 
-    assert data[1][0] is lesson
-    assert [(e.id, e.start_datetime, e.end_datetime) for e in data[1][1:]] == [
-        (
-            42,
-            datetime(2024, 1, 16, 15, 20, tzinfo=UTC),
-            datetime(2024, 1, 16, 15, 40, tzinfo=UTC),
-        )
-    ]
-    assert data[1][1].location == "Room 12"
-    assert [(e.id, e.start_datetime, e.belongs_to) for e in data[2]] == [
-        (42, datetime(2024, 1, 16, 15, 40, tzinfo=UTC), 2)
-    ]
-    # The read covers the same whole days as the calendar read.
-    _child_id, start, end = client.get_meeting_bookings.await_args_list[0].args
-    assert (start.date(), end.date()) == (date(2024, 1, 14), date(2024, 2, 14))
-    assert (start.hour, end.hour) == (0, 0)
-
-
-async def test_calendar_coordinator_keeps_unbooked_meeting(
-    hass: HomeAssistant,
-) -> None:
-    """Test a meeting the child has not booked stays as Aula shows it."""
-    row = _meeting_row()
-    client = AsyncMock()
-    client.get_calendar_events = AsyncMock(return_value=[row])
-    client.get_meeting_bookings = AsyncMock(return_value=[])
-
-    coordinator = AulaCalendarCoordinator(
-        hass, client, mock_profile(), _create_token_manager()
-    )
-    coordinator.config_entry = _create_config_entry()
-
-    data = await coordinator._async_update_data()
-
-    assert data[1] == [row]
-
-
-async def test_calendar_coordinator_booking_read_failure_keeps_calendar(
-    hass: HomeAssistant,
-) -> None:
-    """Test a failed booking read leaves the calendar as Aula shows it."""
-    row = _meeting_row()
-    client = AsyncMock()
-    client.get_calendar_events = AsyncMock(return_value=[row])
-    client.get_meeting_bookings = AsyncMock(
-        side_effect=AulaServerError("Server error", 500)
-    )
-
-    coordinator = AulaCalendarCoordinator(
-        hass, client, mock_profile(), _create_token_manager()
-    )
-    coordinator.config_entry = _create_config_entry()
-
-    data = await coordinator._async_update_data()
-
-    assert data[1] == [row]
-
-
-async def test_calendar_coordinator_booking_read_auth_error(
-    hass: HomeAssistant,
-) -> None:
-    """Test an auth failure on the booking read is not swallowed."""
-    client = AsyncMock()
-    client.get_calendar_events = AsyncMock(return_value=[_meeting_row()])
-    client.get_meeting_bookings = AsyncMock(
-        side_effect=AulaAuthenticationError("Auth failed", 401)
-    )
-    tm = _create_token_manager()
-    tm.async_refresh_and_rebuild_client = AsyncMock(
-        side_effect=AulaAuthenticationError("Refresh failed", 0)
-    )
-
-    coordinator = AulaCalendarCoordinator(hass, client, mock_profile(), tm)
-    coordinator.config_entry = _create_config_entry()
-
-    with pytest.raises(ConfigEntryAuthFailed):
-        await coordinator._async_update_data()
+    assert data == calendars
+    child_ids, start, end = client.get_calendar_events_by_child.await_args.args
+    assert child_ids == [1, 2]
+    assert (start.date(), end.date()) == (date(2024, 1, 14), date(2024, 2, 13))
+    assert (start.hour, start.minute) == (0, 0)
 
 
 async def test_calendar_coordinator_auth_error(hass: HomeAssistant) -> None:
     """Test calendar coordinator raises ConfigEntryAuthFailed on auth error."""
     client = AsyncMock()
-    client.get_calendar_events = AsyncMock(
+    client.get_calendar_events_by_child = AsyncMock(
         side_effect=AulaAuthenticationError("Auth failed", 401)
     )
 
@@ -572,7 +452,7 @@ async def test_calendar_coordinator_auth_error(hass: HomeAssistant) -> None:
 async def test_calendar_coordinator_connection_error(hass: HomeAssistant) -> None:
     """Test calendar coordinator raises UpdateFailed on connection error."""
     client = AsyncMock()
-    client.get_calendar_events = AsyncMock(
+    client.get_calendar_events_by_child = AsyncMock(
         side_effect=AulaConnectionError("Connection failed", 0)
     )
 
