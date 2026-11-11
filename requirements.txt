@@ -2,7 +2,7 @@ colorlog==6.12.0
 homeassistant==2026.11.1
 pip>=26.3
 ruff==0.17.4
-aula==1.17.0
+aula==1.18.0
 # Must match the Home Assistant version pinned above. It also pins pytest.
 pytest-homeassistant==2026.11.1
 # CI runs with --cov; the old test plugin pulled this in, the new one does not.

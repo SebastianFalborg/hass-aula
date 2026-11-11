@@ -16,7 +16,7 @@
   "iot_class": "cloud_polling",
   "issue_tracker": "https://github.com/nickknissen/hass-aula/issues",
   "requirements": [
-    "aula==1.17.0"
+    "aula==1.18.0"
   ],
   "version": "1.6.0"
 }

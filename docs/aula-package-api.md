@@ -1,6 +1,6 @@
 # Aula Python Package API Reference
 
-> **Package:** `aula==1.17.0`
+> **Package:** `aula==1.18.0`
 > **Source:** `../aula` (relative to this repo)
 > **Last updated:** 2026-11-11
 
@@ -69,7 +69,7 @@ Supports `async with` context manager.
 |--------|-----------|-------------|
 | `get_daily_overview` | `async get_daily_overview(child_id: int) -> DailyOverview \| None` | Fetch daily overview for a specific child |
 | `get_presence_templates` | `async get_presence_templates(institution_profile_ids: list[int], from_date: date, to_date: date) -> list[PresenceWeekTemplate]` | Fetch presence week templates for given profiles and date range |
-| `update_presence_template` | `async update_presence_template(institution_profile_id: int, by_date: date, *, entry_time: str, exit_time: str, activity_type: int = 0, exit_with: str \| None = None, comment: str \| None = None, template_id: int \| None = None, repeat_pattern: str = "Never", expires_at: str \| None = None) -> bool` | Create or update presence template (planned entry/exit times); returns True on success |
+| `update_presence_template` | `async update_presence_template(institution_profile_id: int, by_date: date, *, entry_time: str, exit_time: str, activity_type: int = 0, exit_with: str \| None = None, comment: str \| None = None, template_id: int \| None = None, repeat_pattern: str = "Never", expires_at: str \| None = None, self_decider_end_time: str \| None = None) -> bool` | Create or update presence template (planned entry/exit times); returns True on success. With `SELF_DECIDER`, `exit_time` starts the window and `self_decider_end_time` ends it (defaults to `exit_time`; `ValueError` with any other activity type, 1.18.0) |
 | `get_pickup_responsibles` | `async get_pickup_responsibles(child_ids: list[int]) -> list[ChildPickupResponsibles]` | Fetch pickup responsibles (family members + saved suggestions) for children |
 | `get_presence_registrations` | `async get_presence_registrations(institution_profile_ids: list[int], from_date: date, to_date: date) -> list[PresenceRegistration]` | Fetch presence registrations for given profiles and date range (employee-only) |
 | `get_presence_registration_detail` | `async get_presence_registration_detail(registration_id: int) -> PresenceRegistrationDetail \| None` | Fetch detail for a single presence registration (employee-only) |
