@@ -7,7 +7,7 @@ from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any, cast
 
 import voluptuous as vol
-from aula import AulaAuthenticationError, HttpRequestError
+from aula import ActivityType, AulaAuthenticationError, HttpRequestError
 from aula.api_client import ThreadScanLimitError
 from homeassistant.config_entries import ConfigEntryState
 from homeassistant.const import ATTR_AREA_ID, ATTR_DEVICE_ID, ATTR_ENTITY_ID
@@ -31,6 +31,7 @@ from .const import (
     ATTR_EXPIRES_AT,
     ATTR_LIMIT,
     ATTR_REPEAT,
+    ATTR_SELF_DECIDER_END_TIME,
     ATTR_THREAD_ID,
     DEFAULT_THREAD_MESSAGES,
     DOMAIN,
@@ -47,7 +48,7 @@ if TYPE_CHECKING:
     from collections.abc import Callable, Coroutine
     from datetime import date, datetime, time
 
-    from aula import ActivityType, AulaApiClient
+    from aula import AulaApiClient
     from homeassistant.core import HomeAssistant, ServiceCall, ServiceResponse
     from homeassistant.helpers.device_registry import DeviceEntry
 
@@ -70,6 +71,7 @@ UPDATE_PRESENCE_SCHEMA = vol.Schema(
         vol.Optional(ATTR_COMMENT): cv.string,
         vol.Optional(ATTR_REPEAT, default=REPEAT_NEVER): vol.In(REPEAT_PATTERNS),
         vol.Optional(ATTR_EXPIRES_AT): cv.datetime,
+        vol.Optional(ATTR_SELF_DECIDER_END_TIME): cv.time,
     }
 )
 
@@ -103,6 +105,7 @@ class _PresenceUpdate:
     comment: str | None
     repeat_pattern: str
     expires_at: str | None
+    self_decider_end_time: str | None
 
 
 @callback
@@ -263,6 +266,25 @@ def _build_update(call: ServiceCall) -> _PresenceUpdate:
             translation_placeholders={"activity_type": activity_type.display_name},
         )
 
+    end_time: time | None = call.data.get(ATTR_SELF_DECIDER_END_TIME)
+    if end_time is not None:
+        if activity_type is not ActivityType.SELF_DECIDER:
+            raise ServiceValidationError(
+                translation_domain=DOMAIN,
+                translation_key="self_decider_end_time_not_allowed",
+                translation_placeholders={"activity_type": activity_type.display_name},
+            )
+        # For a self-decider, exit_time is the start of the window.
+        if end_time <= exit_time:
+            raise ServiceValidationError(
+                translation_domain=DOMAIN,
+                translation_key="invalid_self_decider_window",
+                translation_placeholders={
+                    "exit_time": exit_time.strftime("%H:%M"),
+                    "end_time": end_time.strftime("%H:%M"),
+                },
+            )
+
     expires_at: datetime | None = call.data.get(ATTR_EXPIRES_AT)
     return _PresenceUpdate(
         by_date=call.data.get(ATTR_DATE) or dt_util.now().date(),
@@ -273,6 +295,7 @@ def _build_update(call: ServiceCall) -> _PresenceUpdate:
         comment=call.data.get(ATTR_COMMENT),
         repeat_pattern=REPEAT_PATTERNS[call.data[ATTR_REPEAT]],
         expires_at=expires_at.isoformat() if expires_at is not None else None,
+        self_decider_end_time=end_time.strftime("%H:%M") if end_time else None,
     )
 
 
@@ -358,6 +381,7 @@ async def _async_apply(
                     template_id=template_ids.get(child_id),
                     repeat_pattern=update.repeat_pattern,
                     expires_at=update.expires_at,
+                    self_decider_end_time=update.self_decider_end_time,
                 )
                 for child_id in child_ids
             ),
