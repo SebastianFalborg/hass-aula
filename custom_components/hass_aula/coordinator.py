@@ -4,13 +4,13 @@ from __future__ import annotations
 
 import asyncio
 import functools
-import re
 from contextlib import asynccontextmanager
 from datetime import date, timedelta
 from typing import TYPE_CHECKING, Any, cast
 
 from aula import (
     AulaAuthenticationError,
+    AulaRejectedError,
     CalendarEvent,
     DailyOverview,
     HttpRequestError,
@@ -65,17 +65,6 @@ if TYPE_CHECKING:
     from .token_manager import AulaTokenManager
 
 
-_REJECTION_CODE = re.compile(r"\(status code (\d+)")
-
-
-def _rejection_code(err: HttpRequestError) -> int | None:
-    """Return the status code Aula put in the body of a request it rejected."""
-    # TODO(aula-package): aula 1.16.0 puts the code only in the message. Read  # noqa: TD003, FIX002, E501
-    # AulaRejectedError.code instead once the pin includes it.
-    match = _REJECTION_CODE.search(str(err))
-    return int(match.group(1)) if match else None
-
-
 @asynccontextmanager
 async def _aula_api_errors(
     token_manager: AulaTokenManager,
@@ -102,10 +91,10 @@ async def _aula_api_errors(
         ) from err
     except HttpRequestError as err:
         # Besides its connection, server and rate-limit subclasses, aula raises
-        # the base class itself when Aula answers 200 with an error code in the
-        # body (aula 1.13.0).
+        # AulaRejectedError when Aula answers with an error code in the body,
+        # often with HTTP 200.
         msg = f"Error communicating with Aula API: {err}"
-        if _rejection_code(err) == AULA_AUTHORIZATION_DENIED:
+        if isinstance(err, AulaRejectedError) and err.code == AULA_AUTHORIZATION_DENIED:
             msg = await _async_rebuild_after_rejection(token_manager, client, msg)
         raise UpdateFailed(msg) from err
 

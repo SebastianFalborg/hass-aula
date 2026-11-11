@@ -10,6 +10,7 @@ from aula import (
     AulaAuthenticationError,
     AulaConnectionError,
     AulaRateLimitError,
+    AulaRejectedError,
     AulaServerError,
     HttpRequestError,
 )
@@ -167,22 +168,32 @@ def _rejecting_presence_coordinator(
     return coordinator, client, tm
 
 
+def _authorization_denied(
+    status_code: int = 200, sub_code: int | None = None
+) -> AulaRejectedError:
+    """Create the error aula raises when Aula answers with code 10."""
+    detail = "status code 10"
+    if sub_code is not None:
+        detail += f", sub-code {sub_code}"
+    return AulaRejectedError(
+        f"Aula rejected x ({detail}, HTTP {status_code})",
+        status_code,
+        code=10,
+        sub_code=sub_code,
+        api_method="x",
+    )
+
+
 @pytest.mark.parametrize(
-    "message",
-    [
-        # aula 1.16.0
-        "Aula rejected presence.getDailyOverview (status code 10)",
-        # aula with AulaRejectedError
-        "Aula rejected presence.getDailyOverview "
-        "(status code 10, sub-code 33, HTTP 403)",
-    ],
+    ("status_code", "sub_code"),
+    [(200, None), (403, 33)],
 )
 async def test_authorization_denied_rebuilds_the_session(
-    hass: HomeAssistant, message: str
+    hass: HomeAssistant, status_code: int, sub_code: int | None
 ) -> None:
     """Aula refusing the session builds a new one instead of polling it forever."""
     coordinator, client, tm = _rejecting_presence_coordinator(
-        hass, HttpRequestError(message, 200)
+        hass, _authorization_denied(status_code, sub_code)
     )
 
     with pytest.raises(UpdateFailed, match="built a new session, retrying"):
@@ -195,13 +206,12 @@ async def test_authorization_denied_rebuilds_the_client_the_request_used(
 ) -> None:
     """A client swapped in mid-request is not the one reported as refused."""
     coordinator, client, tm = _rejecting_presence_coordinator(
-        hass, HttpRequestError("Aula rejected x (status code 10)", 200)
+        hass, _authorization_denied()
     )
 
     async def swap_then_reject(_child_id: int) -> None:
         coordinator.client = AsyncMock()
-        msg = "Aula rejected x (status code 10)"
-        raise HttpRequestError(msg, 200)
+        raise _authorization_denied()
 
     client.get_daily_overview.side_effect = swap_then_reject
 
@@ -213,14 +223,14 @@ async def test_authorization_denied_rebuilds_the_client_the_request_used(
 async def test_authorization_denied_within_the_cooldown(hass: HomeAssistant) -> None:
     """Without a rebuild the poll fails with Aula's rejection alone."""
     coordinator, _client, tm = _rejecting_presence_coordinator(
-        hass, HttpRequestError("Aula rejected x (status code 10)", 200)
+        hass, _authorization_denied()
     )
     tm.async_rebuild_after_rejection.return_value = False
 
     with pytest.raises(UpdateFailed) as exc:
         await coordinator._async_update_data()
     assert str(exc.value) == (
-        "Error communicating with Aula API: Aula rejected x (status code 10)"
+        "Error communicating with Aula API: Aula rejected x (status code 10, HTTP 200)"
     )
 
 
@@ -229,7 +239,7 @@ async def test_authorization_denied_rebuild_auth_failure_reauthenticates(
 ) -> None:
     """A rebuild whose token refresh fails needs a new login."""
     coordinator, _client, tm = _rejecting_presence_coordinator(
-        hass, HttpRequestError("Aula rejected x (status code 10)", 200)
+        hass, _authorization_denied()
     )
     tm.async_rebuild_after_rejection.side_effect = AulaAuthenticationError(
         "Token refresh failed", 0
@@ -244,7 +254,7 @@ async def test_authorization_denied_rebuild_connection_failure(
 ) -> None:
     """A rebuild that cannot reach Aula fails the poll and says so."""
     coordinator, _client, tm = _rejecting_presence_coordinator(
-        hass, HttpRequestError("Aula rejected x (status code 10)", 200)
+        hass, _authorization_denied()
     )
     tm.async_rebuild_after_rejection.side_effect = AulaConnectionError("timeout")
 
@@ -255,7 +265,11 @@ async def test_authorization_denied_rebuild_connection_failure(
 @pytest.mark.parametrize(
     "err",
     [
-        HttpRequestError("Aula rejected x (status code 1)", 200),
+        AulaRejectedError(
+            "Aula rejected x (status code 1, HTTP 200)", 200, code=1, api_method="x"
+        ),
+        # Only aula's typed rejection counts, not a message that mentions code 10.
+        HttpRequestError("Aula rejected x (status code 10)", 200),
         HttpRequestError("HTTP 400", 400),
         AulaServerError("HTTP 503", 503),
     ],
