@@ -245,9 +245,10 @@ Target one or more **child devices** (or any entity belonging to them). Every ta
 | Field | Required | Description |
 |-------|----------|-------------|
 | `entry_time` | yes | Time the child is dropped off, e.g. `08:00` |
-| `exit_time` | yes | Time the child is collected or allowed to leave, e.g. `15:30` |
+| `exit_time` | yes | Time the child is collected or allowed to leave, e.g. `15:30`. With `self_decider`, the earliest time the child may leave |
 | `date` | no | Day to update. Defaults to today |
 | `activity_type` | no | `picked_up_by` (default), `self_decider`, `send_home`, `go_home_with`, `drop_off_time` |
+| `self_decider_end_time` | no | Only with `self_decider`: the latest time the child may leave, so they may go any time from `exit_time` until then, as in Aula. Defaults to `exit_time` |
 | `exit_with` | conditional | Who collects the child. **Required** for `picked_up_by` and `go_home_with`. Include the relation exactly as Aula shows it, e.g. `"Nick Nissen (Far)"` |
 | `comment` | no | Note for the staff |
 | `repeat` | no | `never` (default), `weekly`, `every_2_weeks` |
@@ -267,6 +268,19 @@ data:
   activity_type: picked_up_by
   exit_with: "Nick Nissen (Far)"
   comment: "Går til fodbold bagefter"
+```
+
+**Let a child walk home on their own between 14:00 and 16:00:**
+
+```yaml
+action: hass_aula.update_presence
+target:
+  device_id: abc123def456
+data:
+  entry_time: "08:00"
+  exit_time: "14:00"
+  activity_type: self_decider
+  self_decider_end_time: "16:00"
 ```
 
 **Leave work early on Fridays:**

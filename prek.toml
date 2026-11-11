@@ -27,7 +27,7 @@ files = '^((custom_components|scripts|tests)/.+)?[^/]+\.(py|pyi)$'
 repo = "https://github.com/codespell-project/codespell"
 rev = "v2.4.1"
 hooks = [
-    { id = "codespell", args = ["-L", "appen,hass,mange,mor,som,sover,stil,tekst"] },
+    { id = "codespell", args = ["-L", "appen,hass,mange,mor,selv,som,sover,stil,tekst"] },
 ]
 
 [[repos]]

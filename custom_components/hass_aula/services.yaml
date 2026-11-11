@@ -33,6 +33,11 @@ update_presence:
             - send_home
             - go_home_with
             - drop_off_time
+    self_decider_end_time:
+      required: false
+      example: "16:00"
+      selector:
+        time:
     exit_with:
       required: false
       example: "Nick Nissen (Far)"

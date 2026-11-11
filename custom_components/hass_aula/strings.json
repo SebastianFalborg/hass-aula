@@ -163,6 +163,12 @@
     "invalid_time_range": {
       "message": "The entry time ({entry_time}) must be before the exit time ({exit_time})."
     },
+    "invalid_self_decider_window": {
+      "message": "\"Allowed to leave until\" ({end_time}) must be after the exit time ({exit_time})."
+    },
+    "self_decider_end_time_not_allowed": {
+      "message": "\"Allowed to leave until\" only applies to \"Allowed to leave alone\", not to the activity type \"{activity_type}\"."
+    },
     "no_target": {
       "message": "No Aula child was targeted. Select at least one child device."
     },
@@ -187,7 +193,7 @@
         },
         "exit_time": {
           "name": "Exit time",
-          "description": "Time the child is collected or allowed to leave."
+          "description": "Time the child is collected or allowed to leave. With \"Allowed to leave alone\", the earliest time the child may leave."
         },
         "date": {
           "name": "Date",
@@ -196,6 +202,10 @@
         "activity_type": {
           "name": "Activity type",
           "description": "How the child leaves at the end of the day."
+        },
+        "self_decider_end_time": {
+          "name": "Allowed to leave until",
+          "description": "With \"Allowed to leave alone\": the latest time the child may leave, so the child may leave between the exit time and this time. Leave empty to use the exit time."
         },
         "exit_with": {
           "name": "Collected by",

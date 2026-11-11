@@ -60,6 +60,7 @@ ATTR_EXIT_WITH = "exit_with"
 ATTR_EXPIRES_AT = "expires_at"
 ATTR_LIMIT = "limit"
 ATTR_REPEAT = "repeat"
+ATTR_SELF_DECIDER_END_TIME = "self_decider_end_time"
 ATTR_THREAD_ID = "thread_id"
 
 # Aula's own message list pages at 10; 50 is a generous ceiling for one thread.

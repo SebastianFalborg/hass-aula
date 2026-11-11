@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import inspect
 from datetime import date
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
@@ -12,6 +13,7 @@ import voluptuous as vol
 import yaml
 from aula import (
     ActivityType,
+    AulaApiClient,
     AulaAuthenticationError,
     AulaConnectionError,
     HttpRequestError,
@@ -71,6 +73,18 @@ async def _call(hass: HomeAssistant, **data: Any) -> None:
     )
 
 
+def _assert_fits_installed_aula(update_presence_template: AsyncMock) -> None:
+    """
+    Check the call against the installed aula's real signature.
+
+    The client mock accepts any keyword, so without this a keyword the pinned
+    aula lacks would pass here and raise TypeError in Home Assistant.
+    """
+    inspect.signature(AulaApiClient.update_presence_template).bind(
+        None, **update_presence_template.await_args.kwargs
+    )
+
+
 async def test_service_registered(
     hass: HomeAssistant,
     mock_aula_client: AsyncMock,
@@ -94,6 +108,7 @@ async def test_service_description_loads(
         "exit_time",
         "date",
         "activity_type",
+        "self_decider_end_time",
         "exit_with",
         "comment",
         "repeat",
@@ -153,7 +168,9 @@ async def test_update_presence_by_device(
         template_id=None,
         repeat_pattern="Never",
         expires_at=None,
+        self_decider_end_time=None,
     )
+    _assert_fits_installed_aula(mock_aula_client.update_presence_template)
 
 
 async def test_update_presence_defaults_to_today(
@@ -311,6 +328,74 @@ async def test_exit_with_not_required_for_self_decider(
     )
 
     mock_aula_client.update_presence_template.assert_awaited_once()
+
+
+async def test_self_decider_leaves_within_a_window(
+    hass: HomeAssistant,
+    mock_aula_client: AsyncMock,
+) -> None:
+    """A self-decider may leave from exit_time until self_decider_end_time."""
+    await _setup_integration(hass, mock_aula_client)
+    mock_aula_client.update_presence_template = AsyncMock(return_value=True)
+
+    await _call(
+        hass,
+        **{ATTR_DEVICE_ID: [_device_id(hass, 1)]},
+        entry_time="08:00:00",
+        exit_time="14:00:00",
+        activity_type="self_decider",
+        self_decider_end_time="16:00:00",
+    )
+
+    kwargs = mock_aula_client.update_presence_template.await_args.kwargs
+    assert kwargs["activity_type"] == ActivityType.SELF_DECIDER
+    assert kwargs["exit_time"] == "14:00"
+    assert kwargs["self_decider_end_time"] == "16:00"
+    _assert_fits_installed_aula(mock_aula_client.update_presence_template)
+
+
+async def test_self_decider_end_time_needs_self_decider(
+    hass: HomeAssistant,
+    mock_aula_client: AsyncMock,
+) -> None:
+    """Any other activity type has no window, so the end time is refused."""
+    await _setup_integration(hass, mock_aula_client)
+    mock_aula_client.update_presence_template = AsyncMock(return_value=True)
+
+    with pytest.raises(ServiceValidationError) as err:
+        await _call(
+            hass,
+            **{ATTR_DEVICE_ID: [_device_id(hass, 1)]},
+            entry_time="08:00:00",
+            exit_time="14:00:00",
+            exit_with="Far",
+            self_decider_end_time="16:00:00",
+        )
+
+    assert err.value.translation_key == "self_decider_end_time_not_allowed"
+    mock_aula_client.update_presence_template.assert_not_awaited()
+
+
+async def test_self_decider_window_must_end_after_it_starts(
+    hass: HomeAssistant,
+    mock_aula_client: AsyncMock,
+) -> None:
+    """An end time at or before exit_time is refused."""
+    await _setup_integration(hass, mock_aula_client)
+    mock_aula_client.update_presence_template = AsyncMock(return_value=True)
+
+    with pytest.raises(ServiceValidationError) as err:
+        await _call(
+            hass,
+            **{ATTR_DEVICE_ID: [_device_id(hass, 1)]},
+            entry_time="08:00:00",
+            exit_time="16:00:00",
+            activity_type="self_decider",
+            self_decider_end_time="14:00:00",
+        )
+
+    assert err.value.translation_key == "invalid_self_decider_window"
+    mock_aula_client.update_presence_template.assert_not_awaited()
 
 
 async def test_invalid_time_range(

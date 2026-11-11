@@ -163,6 +163,12 @@
     "invalid_time_range": {
       "message": "Afleveringstiden ({entry_time}) skal ligge før hentetiden ({exit_time})."
     },
+    "invalid_self_decider_window": {
+      "message": "\"Selvbestemmer til\" ({end_time}) skal ligge efter hentetiden ({exit_time})."
+    },
+    "self_decider_end_time_not_allowed": {
+      "message": "\"Selvbestemmer til\" kan kun bruges med \"Selvbestemmer\", ikke med aktivitetstypen \"{activity_type}\"."
+    },
     "no_target": {
       "message": "Der blev ikke valgt noget Aula-barn. Vælg mindst én barne-enhed."
     },
@@ -187,7 +193,7 @@
         },
         "exit_time": {
           "name": "Hentetid",
-          "description": "Tidspunkt hvor barnet bliver hentet eller må gå."
+          "description": "Tidspunkt hvor barnet bliver hentet eller må gå. Ved \"Selvbestemmer\" det tidligste tidspunkt, barnet må gå."
         },
         "date": {
           "name": "Dato",
@@ -196,6 +202,10 @@
         "activity_type": {
           "name": "Aktivitetstype",
           "description": "Hvordan barnet forlader institutionen."
+        },
+        "self_decider_end_time": {
+          "name": "Selvbestemmer til",
+          "description": "Ved \"Selvbestemmer\": det seneste tidspunkt, barnet må gå selv, så barnet må gå mellem hentetiden og dette tidspunkt. Lad feltet stå tomt for at bruge hentetiden."
         },
         "exit_with": {
           "name": "Hentes af",
