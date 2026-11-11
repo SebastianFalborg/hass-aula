@@ -6,37 +6,40 @@ from datetime import UTC, datetime, timedelta
 from unittest.mock import AsyncMock
 
 from aula import HttpRequestError
+from freezegun.api import FrozenDateTimeFactory
 from homeassistant.core import HomeAssistant
 from homeassistant.util import dt as dt_util
 
 from custom_components.hass_aula.calendar import _convert_event
 
-from .conftest import make_config_entry, mock_calendar_event, mock_meeting_booking
+from .conftest import (
+    make_config_entry,
+    mock_calendar_event,
+    mock_child,
+    mock_profile,
+)
 
 
-async def test_calendar_get_events_shows_booked_meeting_slot(
+async def test_calendar_get_events_reads_this_childs_calendar(
     hass: HomeAssistant,
     mock_aula_client: AsyncMock,
 ) -> None:
-    """Test a range read shows the booked slot, not the booking period."""
+    """Test a range read shows the child's calendar as aula assembles it."""
     entry = make_config_entry()
     entry.add_to_hass(hass)
     await hass.config_entries.async_setup(entry.entry_id)
     await hass.async_block_till_done()
 
-    mock_aula_client.get_calendar_events = AsyncMock(
-        return_value=[
-            mock_calendar_event(
-                event_id=42,
-                title="Skole-hjem-samtale",
-                start=datetime(2024, 1, 15, 8, 0, tzinfo=UTC),
-                end=datetime(2024, 1, 19, 16, 0, tzinfo=UTC),
-                event_type="school_home_meeting",
-            )
-        ]
+    # aula has already put the booked slot in place of the booking period.
+    booked_slot = mock_calendar_event(
+        event_id=42,
+        title="Skole-hjem-samtale",
+        start=datetime(2024, 1, 16, 15, 20, tzinfo=UTC),
+        end=datetime(2024, 1, 16, 15, 40, tzinfo=UTC),
+        event_type="school_home_meeting",
     )
-    mock_aula_client.get_meeting_bookings = AsyncMock(
-        return_value=[mock_meeting_booking(child_id=1)]
+    mock_aula_client.get_calendar_events_by_child = AsyncMock(
+        return_value={1: [booked_slot]}
     )
     start = datetime(2024, 1, 15, tzinfo=UTC)
     response = await hass.services.async_call(
@@ -66,6 +69,11 @@ async def test_calendar_get_events_shows_booked_meeting_slot(
             datetime(2024, 1, 16, 15, 40, tzinfo=UTC),
         )
     ]
+    child_ids, range_start, range_end = (
+        mock_aula_client.get_calendar_events_by_child.await_args.args
+    )
+    assert child_ids == [1]
+    assert (range_start, range_end) == (start, start + timedelta(days=7))
 
 
 async def test_calendar_entity_created(
@@ -92,7 +100,7 @@ async def test_calendar_with_events(
         teacher_name="Mr. Smith",
         belongs_to=1,
     )
-    mock_aula_client.get_calendar_events = AsyncMock(return_value=[event])
+    mock_aula_client.get_calendar_events_by_child = AsyncMock(return_value={1: [event]})
 
     entry = make_config_entry()
     entry.add_to_hass(hass)
@@ -103,12 +111,41 @@ async def test_calendar_with_events(
     assert state is not None
 
 
+async def test_calendar_shared_lesson_is_on_for_both_twins(
+    hass: HomeAssistant,
+    mock_aula_client: AsyncMock,
+    freezer: FrozenDateTimeFactory,
+) -> None:
+    """Test a lesson twins share is the current event on both calendars."""
+    freezer.move_to("2024-01-15T09:30:00+00:00")
+    mock_aula_client.get_profile = AsyncMock(
+        return_value=mock_profile([mock_child(1), mock_child(2, name="Second Child")])
+    )
+    shared = mock_calendar_event(title="Dansk", profiles=[1, 2])
+    mock_aula_client.get_calendar_events_by_child = AsyncMock(
+        return_value={1: [shared], 2: [shared]}
+    )
+
+    entry = make_config_entry()
+    entry.add_to_hass(hass)
+    await hass.config_entries.async_setup(entry.entry_id)
+    await hass.async_block_till_done()
+
+    for entity_id in (
+        "calendar.test_child_school_calendar",
+        "calendar.second_child_school_calendar",
+    ):
+        state = hass.states.get(entity_id)
+        assert state is not None
+        assert (state.state, state.attributes["message"]) == ("on", "Dansk")
+
+
 async def test_calendar_empty(
     hass: HomeAssistant,
     mock_aula_client: AsyncMock,
 ) -> None:
     """Test calendar with no events."""
-    mock_aula_client.get_calendar_events = AsyncMock(return_value=[])
+    mock_aula_client.get_calendar_events_by_child = AsyncMock(return_value={1: []})
 
     entry = make_config_entry()
     entry.add_to_hass(hass)
@@ -132,7 +169,7 @@ async def test_calendar_event_with_substitute(
         substitute_name="Mr. Brown",
         belongs_to=1,
     )
-    mock_aula_client.get_calendar_events = AsyncMock(return_value=[event])
+    mock_aula_client.get_calendar_events_by_child = AsyncMock(return_value={1: [event]})
 
     entry = make_config_entry()
     entry.add_to_hass(hass)
@@ -153,7 +190,7 @@ async def test_calendar_event_with_location(
         location="Sports Hall",
         belongs_to=1,
     )
-    mock_aula_client.get_calendar_events = AsyncMock(return_value=[event])
+    mock_aula_client.get_calendar_events_by_child = AsyncMock(return_value={1: [event]})
 
     entry = make_config_entry()
     entry.add_to_hass(hass)
@@ -174,7 +211,7 @@ async def test_calendar_get_events_api_error(
     await hass.config_entries.async_setup(entry.entry_id)
     await hass.async_block_till_done()
 
-    mock_aula_client.get_calendar_events = AsyncMock(
+    mock_aula_client.get_calendar_events_by_child = AsyncMock(
         side_effect=HttpRequestError("Aula rejected method (status code 1)", 200)
     )
     start = dt_util.now()

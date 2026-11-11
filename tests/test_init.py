@@ -38,7 +38,7 @@ def _make_refreshed_client() -> AsyncMock:
     client = AsyncMock()
     client.get_profile = AsyncMock(return_value=mock_profile())
     client.get_daily_overview = AsyncMock(return_value=None)
-    client.get_calendar_events = AsyncMock(return_value=[])
+    client.get_calendar_events_by_child = AsyncMock(return_value={})
     client.get_notifications_for_active_profile = AsyncMock(return_value=[])
     client.close = AsyncMock()
     return client
@@ -279,7 +279,7 @@ async def test_stale_device_removal(
         client = AsyncMock()
         client.get_profile = AsyncMock(return_value=profile_with_two)
         client.get_daily_overview = AsyncMock(return_value=None)
-        client.get_calendar_events = AsyncMock(return_value=[])
+        client.get_calendar_events_by_child = AsyncMock(return_value={})
         client.get_notifications_for_active_profile = AsyncMock(return_value=[])
         client.close = AsyncMock()
         mock_create.return_value = client

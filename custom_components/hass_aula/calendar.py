@@ -10,11 +10,7 @@ from homeassistant.components.calendar import CalendarEntity, CalendarEvent
 from homeassistant.util import dt as dt_util
 
 from .const import PARALLEL_UPDATES as PARALLEL_UPDATES  # noqa: PLC0414
-from .coordinator import (
-    AulaCalendarCoordinator,
-    async_fetch_meeting_bookings,
-    replace_booked_meetings,
-)
+from .coordinator import AulaCalendarCoordinator
 from .entity import AulaEntity
 
 if TYPE_CHECKING:
@@ -111,20 +107,10 @@ class AulaCalendarEntity(AulaEntity[AulaCalendarCoordinator], CalendarEntity):
     ) -> list[CalendarEvent]:
         """Return calendar events within a date range."""
         try:
-            events = await self.coordinator.client.get_calendar_events(
-                institution_profile_ids=[self._child.id],
-                start=start_date,
-                end=end_date,
-            )
-            bookings = await async_fetch_meeting_bookings(
-                self.coordinator.client,
-                [self._child.id],
-                events,
-                start_date,
-                end_date,
+            calendars = await self.coordinator.client.get_calendar_events_by_child(
+                [self._child.id], start_date, end_date
             )
         except HttpRequestError:
             return []
 
-        events = replace_booked_meetings(events, bookings.get(self._child.id, []))
-        return [_convert_event(event) for event in events]
+        return [_convert_event(event) for event in calendars.get(self._child.id, [])]

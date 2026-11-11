@@ -13,7 +13,6 @@ from aula.models import (
     Appointment,
     EasyIQHomework,
     LibraryLoan,
-    MeetingBooking,
     MUTask,
 )
 from aula.models.child import Child
@@ -198,6 +197,7 @@ def mock_calendar_event(
     teacher_names: list[str] | None = None,
     substitute_names: list[str] | None = None,
     event_type: str = "lesson",
+    profiles: list[int] | None = None,
 ) -> MagicMock:
     """
     Create a mock CalendarEvent object.
@@ -227,28 +227,9 @@ def mock_calendar_event(
         if substitute_names is not None
         else ([substitute_name] if substitute_name else [])
     )
-    event._raw = {"id": event_id, "type": event_type}
+    event.belongs_to_profiles = profiles if profiles is not None else [belongs_to]
+    event.event_type = event_type
     return event
-
-
-def mock_meeting_booking(
-    meeting_id: int = 42,
-    child_id: int = 1,
-    start: datetime | None = None,
-    end: datetime | None = None,
-    title: str = "Skole-hjem-samtale",
-    location: str | None = "Room 12",
-) -> MeetingBooking:
-    """Create a MeetingBooking for one booked slot."""
-    return MeetingBooking(
-        meeting_id=meeting_id,
-        child_id=child_id,
-        title=title,
-        meeting_type="school_home_meeting",
-        start_datetime=start or datetime(2024, 1, 16, 15, 20, tzinfo=UTC),
-        end_datetime=end or datetime(2024, 1, 16, 15, 40, tzinfo=UTC),
-        location=location,
-    )
 
 
 def mock_notification(
@@ -571,7 +552,13 @@ def mock_aula_client() -> Generator[AsyncMock]:
         client.get_profile = AsyncMock(return_value=mock_profile())
         client.get_daily_overview = AsyncMock(return_value=mock_daily_overview())
         client.get_presence_templates = AsyncMock(return_value=[])
-        client.get_calendar_events = AsyncMock(return_value=[mock_calendar_event()])
+        # Like aula, answer with a list for every requested child.
+        client.get_calendar_events_by_child = AsyncMock(
+            side_effect=lambda child_ids, _start, _end: {
+                child_id: [mock_calendar_event()] if child_id == 1 else []
+                for child_id in child_ids
+            }
+        )
         client.get_notifications_for_active_profile = AsyncMock(
             return_value=[mock_notification()]
         )
