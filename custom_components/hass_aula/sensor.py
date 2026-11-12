@@ -531,10 +531,11 @@ class AulaEasyIQWeekplanSensor(AulaEntity[AulaEasyIQCoordinator], SensorEntity):
     def extra_state_attributes(self) -> dict[str, Any]:
         """Return appointment details."""
         data = self._child_data
-        if not data or not data.weekplan:
+        if not data:
             return {}
-        return {
-            "appointments": [
+        attrs: dict[str, Any] = {}
+        if data.weekplan:
+            attrs["appointments"] = [
                 {
                     "title": a.title,
                     "start": a.start,
@@ -554,8 +555,13 @@ class AulaEasyIQWeekplanSensor(AulaEntity[AulaEasyIQCoordinator], SensorEntity):
                     "is_notice": a.is_notice,
                 }
                 for a in data.weekplan[:MAX_ATTRIBUTE_ITEMS]
-            ],
-        }
+            ]
+        # The week's general text ("Generelt om ugen"), as the HTML the
+        # teacher authored. Omitted when the class has none this week, so a
+        # template can default on it the way the Meebook ones do.
+        if data.week_text:
+            attrs["week_text"] = data.week_text
+        return attrs
 
 
 class AulaEasyIQHomeworkSensor(AulaEntity[AulaEasyIQCoordinator], SensorEntity):

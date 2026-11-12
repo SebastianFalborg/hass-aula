@@ -56,6 +56,9 @@ class EasyIQChildData:
 
     weekplan: list[Appointment] = field(default_factory=list)
     homework: list[EasyIQHomework] = field(default_factory=list)
+    # The week's general text ("Generelt om ugen"), from the portal's
+    # WeekPlan controller. Empty when the class has none this week.
+    week_text: str = ""
 
 
 @dataclass

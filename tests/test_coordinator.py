@@ -684,6 +684,9 @@ async def test_easyiq_coordinator_fetch(hass: HomeAssistant) -> None:
     hw = mock_easyiq_homework()
     client.widgets = MagicMock()
     client.widgets.get_easyiq_weekplan = AsyncMock(return_value=[appt])
+    client.widgets.get_easyiq_weekplan_text = AsyncMock(
+        return_value="Generelt: husk gympakke"
+    )
     client.widgets.get_easyiq_homework = AsyncMock(return_value=[hw])
 
     profile = mock_profile()
@@ -699,6 +702,32 @@ async def test_easyiq_coordinator_fetch(hass: HomeAssistant) -> None:
     assert data[1].weekplan[0] is appt
     assert len(data[1].homework) == 1
     assert data[1].homework[0] is hw
+    assert data[1].week_text == "Generelt: husk gympakke"
+
+
+async def test_easyiq_coordinator_week_text_failure_keeps_the_grid(
+    hass: HomeAssistant,
+) -> None:
+    """A failed week-text read costs the text, not the lesson grid."""
+    client = AsyncMock()
+    appt = mock_appointment()
+    client.widgets = MagicMock()
+    client.widgets.get_easyiq_weekplan = AsyncMock(return_value=[appt])
+    client.widgets.get_easyiq_weekplan_text = AsyncMock(
+        side_effect=AulaConnectionError("Connection failed", 0)
+    )
+    client.widgets.get_easyiq_homework = AsyncMock(return_value=[])
+
+    profile = mock_profile()
+    ctx = _create_widget_context()
+    tm = _create_token_manager()
+    coordinator = AulaEasyIQCoordinator(hass, client, profile, ctx, tm)
+    coordinator.config_entry = _create_config_entry()
+
+    data = await coordinator._async_update_data()
+
+    assert len(data[1].weekplan) == 1
+    assert data[1].week_text == ""
 
 
 async def test_easyiq_coordinator_passes_portal_identifiers(
@@ -708,6 +737,7 @@ async def test_easyiq_coordinator_passes_portal_identifiers(
     client = AsyncMock()
     client.widgets = MagicMock()
     client.widgets.get_easyiq_weekplan = AsyncMock(return_value=[])
+    client.widgets.get_easyiq_weekplan_text = AsyncMock(return_value="")
     client.widgets.get_easyiq_homework = AsyncMock(return_value=[])
 
     profile = mock_profile()
@@ -777,6 +807,7 @@ async def test_easyiq_coordinator_passes_guardian_institutions(
     client = AsyncMock()
     client.widgets = MagicMock()
     client.widgets.get_easyiq_weekplan = AsyncMock(return_value=[])
+    client.widgets.get_easyiq_weekplan_text = AsyncMock(return_value="")
     client.widgets.get_easyiq_homework = AsyncMock(return_value=[])
 
     # A guardian with a child at each of two schools. Reading child 1's week

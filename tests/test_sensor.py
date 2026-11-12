@@ -571,6 +571,9 @@ async def test_easyiq_weekplan_sensor(
     """Test EasyIQ weekplan sensor shows appointment count."""
     appt = mock_appointment()
     mock_aula_client.widgets.get_easyiq_weekplan = AsyncMock(return_value=[appt])
+    mock_aula_client.widgets.get_easyiq_weekplan_text = AsyncMock(
+        return_value="<p>Generelt om ugen</p>"
+    )
     mock_aula_client.widgets.get_easyiq_homework = AsyncMock(return_value=[])
 
     entry = make_widget_config_entry(
@@ -585,6 +588,50 @@ async def test_easyiq_weekplan_sensor(
     assert state.state == "1"
     assert len(state.attributes["appointments"]) == 1
     assert state.attributes["appointments"][0]["title"] == "Science Class"
+    assert state.attributes["week_text"] == "<p>Generelt om ugen</p>"
+
+
+async def test_easyiq_weekplan_sensor_omits_an_empty_week_text(
+    hass: HomeAssistant,
+    mock_aula_client: AsyncMock,
+) -> None:
+    """A week without a general text leaves the attribute out entirely."""
+    appt = mock_appointment()
+    mock_aula_client.widgets.get_easyiq_weekplan = AsyncMock(return_value=[appt])
+    mock_aula_client.widgets.get_easyiq_weekplan_text = AsyncMock(return_value="")
+    mock_aula_client.widgets.get_easyiq_homework = AsyncMock(return_value=[])
+
+    entry = make_widget_config_entry(widgets=[WIDGET_EASYIQ_WEEKPLAN])
+    entry.add_to_hass(hass)
+    await hass.config_entries.async_setup(entry.entry_id)
+    await hass.async_block_till_done()
+
+    state = hass.states.get("sensor.test_child_weekplan")
+    assert state is not None
+    assert "week_text" not in state.attributes
+
+
+async def test_easyiq_weekplan_sensor_keeps_a_text_only_week(
+    hass: HomeAssistant,
+    mock_aula_client: AsyncMock,
+) -> None:
+    """A week with a general text but no lessons still shows the text."""
+    mock_aula_client.widgets.get_easyiq_weekplan = AsyncMock(return_value=[])
+    mock_aula_client.widgets.get_easyiq_weekplan_text = AsyncMock(
+        return_value="<p>Uge 47: temauge</p>"
+    )
+    mock_aula_client.widgets.get_easyiq_homework = AsyncMock(return_value=[])
+
+    entry = make_widget_config_entry(widgets=[WIDGET_EASYIQ_WEEKPLAN])
+    entry.add_to_hass(hass)
+    await hass.config_entries.async_setup(entry.entry_id)
+    await hass.async_block_till_done()
+
+    state = hass.states.get("sensor.test_child_weekplan")
+    assert state is not None
+    assert state.state == "0"
+    assert state.attributes["week_text"] == "<p>Uge 47: temauge</p>"
+    assert "appointments" not in state.attributes
 
 
 async def test_easyiq_homework_sensor(

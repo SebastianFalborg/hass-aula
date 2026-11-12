@@ -537,6 +537,7 @@ def _setup_widget_mocks(client: AsyncMock) -> None:
     client.widgets.get_mu_tasks = AsyncMock(return_value=[])
     client.widgets.get_ugeplan = AsyncMock(return_value=[])
     client.widgets.get_easyiq_weekplan = AsyncMock(return_value=[])
+    client.widgets.get_easyiq_weekplan_text = AsyncMock(return_value="")
     client.widgets.get_easyiq_homework = AsyncMock(return_value=[])
     client.widgets.get_meebook_weekplan = AsyncMock(return_value=[])
     client.widgets.get_momo_reminders = AsyncMock(return_value=[])

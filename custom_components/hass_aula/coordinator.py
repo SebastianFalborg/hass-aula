@@ -759,7 +759,26 @@ class AulaEasyIQCoordinator(
                 # leave this one's sensors empty.
                 LOGGER.debug("EasyIQ has no record of child %s", child.id)
                 return child.id, EasyIQChildData()
-            return child.id, EasyIQChildData(weekplan=weekplan, homework=homework)
+            # The week's general text ("Generelt om ugen") lives in the
+            # portal's WeekPlan controller, which the weekplan read does not
+            # cover. Best-effort: a failure costs the text, not the lesson
+            # grid the weekplan read already served.
+            try:
+                week_text = await self.client.widgets.get_easyiq_weekplan_text(
+                    week=week,
+                    session_uuid=self.widget_context.session_uuid,
+                    institution_filter=inst_filter,
+                    child_id=child_id_str,
+                    child_profile_id=str(child.id),
+                    all_child_user_ids=self.widget_context.child_filter,
+                    all_institution_filter=self.widget_context.institution_filter,
+                )
+            except Exception as err:  # noqa: BLE001
+                LOGGER.debug("EasyIQ week text failed for child %s: %s", child.id, err)
+                week_text = ""
+            return child.id, EasyIQChildData(
+                weekplan=weekplan, homework=homework, week_text=week_text
+            )
 
         async with _aula_api_errors(self.token_manager, self.client):
             try:
