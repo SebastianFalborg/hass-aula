@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+from dataclasses import replace
 from types import SimpleNamespace
 from typing import Any
 from unittest.mock import AsyncMock, patch
@@ -14,6 +15,7 @@ from homeassistant.config_entries import SOURCE_USER
 from homeassistant.core import HomeAssistant
 from homeassistant.data_entry_flow import FlowResultType
 
+from custom_components.hass_aula.config_flow import _selectable_widgets
 from custom_components.hass_aula.const import (
     AUTH_METHOD_APP,
     AUTH_METHOD_TOKEN,
@@ -36,6 +38,29 @@ from .conftest import MOCK_TOKEN_DATA, MOCK_USERNAME, make_config_entry
 def test_meebook_overview_widget_is_supported() -> None:
     """Test Meebook overblik is offered as a supported data provider."""
     assert WIDGET_MEEBOOK_OVERVIEW in SUPPORTED_WIDGETS
+
+
+def test_selectable_widgets_offers_iframe_typed_secure_widgets() -> None:
+    """
+    The EasyIQ weekplan is typed 'iframe' but secure; the dialog must offer it.
+
+    The filter used to check ``widget_type == "secure"``, which dropped every
+    secure widget the portal renders another way — the EasyIQ weekplan among
+    them, leaving EasyIQ schools nothing to select.
+    """
+    iframe_weekplan = WidgetConfiguration(
+        widget_id="0128",
+        name="EasyIQ Ugeplan",
+        widget_supplier="EasyIQ",
+        widget_type="iframe",
+        placement="fullWidth",
+        is_secure=True,
+        can_access_on_mobile=True,
+        aggregated_display_mode="Shown",
+    )
+    unsecured = replace(iframe_weekplan, is_secure=False)
+
+    assert _selectable_widgets([iframe_weekplan, unsecured]) == [iframe_weekplan]
 
 
 def _widget(

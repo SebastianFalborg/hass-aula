@@ -45,6 +45,22 @@ if TYPE_CHECKING:
     import qrcode
 
 
+def _selectable_widgets(
+    widgets: list[WidgetConfiguration],
+) -> list[WidgetConfiguration]:
+    """
+    Return the widgets the data-provider dialog may offer.
+
+    The portal's widget list mixes in widgets the guardian can see in the app
+    but this integration cannot serve, so the dialog marks those "(not
+    supported)" instead of hiding them. What the portal itself marks secure
+    decides what is offered as supported: the EasyIQ weekplan is typed
+    "iframe" but secure, and filtering on the type string instead dropped it
+    from every EasyIQ school's dialog.
+    """
+    return [w for w in widgets if w.is_secure]
+
+
 def _auth_method_selector() -> selector.SelectSelector:
     """Selector for the MitID authenticator to use."""
     return selector.SelectSelector(
@@ -618,9 +634,7 @@ class AulaFlowHandler(ConfigFlow, domain=DOMAIN):
         http_client = await self.hass.async_add_executor_job(HttpxHttpClient, cookies)
         try:
             client = await create_client(self._token_data, http_client=http_client)
-            widgets = [
-                w for w in await client.get_widgets() if w.widget_type == "secure"
-            ]
+            widgets = _selectable_widgets(await client.get_widgets())
         except Exception:  # noqa: BLE001
             LOGGER.exception("Failed to fetch widgets")
             return []
